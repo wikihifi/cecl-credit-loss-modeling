@@ -6,7 +6,7 @@ Built to demonstrate proficiency in quantitative credit risk analysis, model dev
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cecl-credit-loss-modeling.streamlit.app)
 
-> **[Live Dashboard](https://cecl-credit-loss-modeling.streamlit.app)** | **[Framework Overview (Video)](https://youtu.be/qORtDigZkz0)** | **[Model Documentation](docs/model_documentation.md)**
+> **[Live Dashboard](https://cecl-credit-loss-modeling.streamlit.app)** | **[Framework Overview (Video)](https://youtu.be/qORtDigZkz0)** | **[Build & Run Guide](docs/build_and_run.md)** | **[Model Documentation](docs/model_documentation.md)**
 
 ---
 
