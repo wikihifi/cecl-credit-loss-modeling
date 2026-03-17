@@ -1,5 +1,5 @@
 FRED API KEY:
-Your registered API key is: 50afcbf3e434641f6d8609f072b44337 Documentation is available on the St. Louis Fed web services website.
+Your registered API key is: xxx Documentation is available on the St. Louis Fed web services website.
 
 simulations,mps,cpu
 1,12.5,11.2
