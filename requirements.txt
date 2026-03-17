@@ -6,3 +6,5 @@ scikit-learn
 xgboost
 joblib
 pyarrow
+fredapi
+python-dotenv
