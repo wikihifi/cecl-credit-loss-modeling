@@ -1,0 +1,1432 @@
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 10,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000 Monte Carlo simulations on mps...
+  Completed in 1.0 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,559M (6.37%)
+    Std Deviation:          $    11,320M
+    VaR 99%:                $    71,869M (11.87%)
+    VaR 99.9%:              $    83,805M (13.84%)
+    Expected Shortfall 99%: $    77,566M (12.81%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,964M (4.62%)
+    Median:          $    36,658M (6.05%)
+    75th percentile: $    45,553M (7.52%)
+    95th percentile: $    59,704M (9.86%)
+    Maximum:         $   102,481M (16.92%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000
+  Expected Loss (mean):  $    38,559M (6.37%)
+  VaR 99%:               $    71,869M (11.87%)
+  VaR 99.9%:             $    83,805M (13.84%)
+  Expected Shortfall:    $    77,566M (12.81%)
+
+  Total time: 10.5 seconds (0.2 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend cpu
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 10,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000 Monte Carlo simulations on cpu...
+  Completed in 0.0 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,536M (6.36%)
+    Std Deviation:          $    11,435M
+    VaR 99%:                $    71,109M (11.74%)
+    VaR 99.9%:              $    83,486M (13.79%)
+    Expected Shortfall 99%: $    76,938M (12.71%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,789M (4.59%)
+    Median:          $    36,376M (6.01%)
+    75th percentile: $    45,818M (7.57%)
+    95th percentile: $    60,341M (9.97%)
+    Maximum:         $   105,985M (17.50%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               cpu
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000
+  Expected Loss (mean):  $    38,536M (6.36%)
+  VaR 99%:               $    71,109M (11.74%)
+  VaR 99.9%:             $    83,486M (13.79%)
+  Expected Shortfall:    $    76,938M (12.71%)
+
+  Total time: 4.2 seconds (0.1 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 500000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 500,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 500,000 Monte Carlo simulations
+======================================================================
+
+  Running 500,000 Monte Carlo simulations on mps...
+  Completed in 0.3 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,352M (6.33%)
+    Std Deviation:          $    11,288M
+    VaR 99%:                $    70,793M (11.69%)
+    VaR 99.9%:              $    85,125M (14.06%)
+    Expected Shortfall 99%: $    77,084M (12.73%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,740M (4.58%)
+    Median:          $    36,239M (5.98%)
+    75th percentile: $    45,495M (7.51%)
+    95th percentile: $    59,617M (9.85%)
+    Maximum:         $   113,280M (18.71%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           500,000
+  Expected Loss (mean):  $    38,352M (6.33%)
+  VaR 99%:               $    70,793M (11.69%)
+  VaR 99.9%:             $    85,125M (14.06%)
+  Expected Shortfall:    $    77,084M (12.73%)
+
+  Total time: 7.4 seconds (0.1 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend gpu --n-simulations 500000
+
+usage: run_monte_carlo_custom_backend.py [-h] [--backend {cpu,mps,cuda}] [--n-simulations N_SIMULATIONS] [--random-seed RANDOM_SEED] [--dtype {float16,float32,float64}] [--output-prefix OUTPUT_PREFIX]
+                                         [--write-standard-files]
+run_monte_carlo_custom_backend.py: error: argument --backend: invalid choice: 'gpu' (choose from 'cpu', 'mps', 'cuda')
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 500000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 500,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 500,000 Monte Carlo simulations
+======================================================================
+
+  Running 500,000 Monte Carlo simulations on cpu...
+  Completed in 0.0 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,321M (6.33%)
+    Std Deviation:          $    11,276M
+    VaR 99%:                $    70,785M (11.69%)
+    VaR 99.9%:              $    84,772M (14.00%)
+    Expected Shortfall 99%: $    76,969M (12.71%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,715M (4.58%)
+    Median:          $    36,207M (5.98%)
+    75th percentile: $    45,421M (7.50%)
+    95th percentile: $    59,603M (9.84%)
+    Maximum:         $   128,644M (21.24%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               cpu
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           500,000
+  Expected Loss (mean):  $    38,321M (6.33%)
+  VaR 99%:               $    70,785M (11.69%)
+  VaR 99.9%:             $    84,772M (14.00%)
+  Expected Shortfall:    $    76,969M (12.71%)
+
+  Total time: 6.0 seconds (0.1 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 1000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 1,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 1,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 1,000,000 Monte Carlo simulations on cpu...
+  Completed in 0.1 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,325M (6.33%)
+    Std Deviation:          $    11,271M
+    VaR 99%:                $    70,722M (11.68%)
+    VaR 99.9%:              $    84,808M (14.01%)
+    Expected Shortfall 99%: $    76,903M (12.70%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,723M (4.58%)
+    Median:          $    36,222M (5.98%)
+    75th percentile: $    45,430M (7.50%)
+    95th percentile: $    59,588M (9.84%)
+    Maximum:         $   128,644M (21.24%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               cpu
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           1,000,000
+  Expected Loss (mean):  $    38,325M (6.33%)
+  VaR 99%:               $    70,722M (11.68%)
+  VaR 99.9%:             $    84,808M (14.01%)
+  Expected Shortfall:    $    76,903M (12.70%)
+
+  Total time: 7.6 seconds (0.1 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 1000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 1,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 1,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 1,000,000 Monte Carlo simulations on mps...
+  Completed in 0.2 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,336M (6.33%)
+    Std Deviation:          $    11,281M
+    VaR 99%:                $    70,734M (11.68%)
+    VaR 99.9%:              $    85,112M (14.06%)
+    Expected Shortfall 99%: $    77,043M (12.72%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,745M (4.58%)
+    Median:          $    36,220M (5.98%)
+    75th percentile: $    45,446M (7.51%)
+    95th percentile: $    59,609M (9.84%)
+    Maximum:         $   122,153M (20.17%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           1,000,000
+  Expected Loss (mean):  $    38,336M (6.33%)
+  VaR 99%:               $    70,734M (11.68%)
+  VaR 99.9%:             $    85,112M (14.06%)
+  Expected Shortfall:    $    77,043M (12.72%)
+
+  Total time: 7.5 seconds (0.1 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 10000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 10,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000,000 Monte Carlo simulations on mps...
+  Completed in 0.3 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,326M (6.33%)
+    Std Deviation:          $    11,273M
+    VaR 99%:                $    70,722M (11.68%)
+    VaR 99.9%:              $    84,990M (14.04%)
+    Expected Shortfall 99%: $    76,954M (12.71%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,735M (4.58%)
+    Median:          $    36,220M (5.98%)
+    75th percentile: $    45,434M (7.50%)
+    95th percentile: $    59,578M (9.84%)
+    Maximum:         $   126,432M (20.88%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000,000
+  Expected Loss (mean):  $    38,326M (6.33%)
+  VaR 99%:               $    70,722M (11.68%)
+  VaR 99.9%:             $    84,990M (14.04%)
+  Expected Shortfall:    $    76,954M (12.71%)
+
+  Total time: 34.5 seconds (0.6 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 10000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 10,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000,000 Monte Carlo simulations on cpu...
+  Completed in 0.4 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,330M (6.33%)
+    Std Deviation:          $    11,271M
+    VaR 99%:                $    70,718M (11.68%)
+    VaR 99.9%:              $    84,733M (13.99%)
+    Expected Shortfall 99%: $    76,888M (12.70%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,733M (4.58%)
+    Median:          $    36,230M (5.98%)
+    75th percentile: $    45,437M (7.50%)
+    95th percentile: $    59,589M (9.84%)
+    Maximum:         $   141,907M (23.44%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               cpu
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000,000
+  Expected Loss (mean):  $    38,330M (6.33%)
+  VaR 99%:               $    70,718M (11.68%)
+  VaR 99.9%:             $    84,733M (13.99%)
+  Expected Shortfall:    $    76,888M (12.70%)
+
+  Total time: 40.2 seconds (0.7 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 100000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 100,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 100,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 100,000,000 Monte Carlo simulations on mps...
+  Completed in 1.1 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+Traceback (most recent call last):
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 423, in _torch_quantile
+    return torch.quantile(values, q)
+RuntimeError: quantile() input tensor is too large
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/run_monte_carlo_custom_backend.py", line 349, in <module>
+    main()
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/run_monte_carlo_custom_backend.py", line 254, in main
+    metrics = compute_risk_metrics(
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 461, in compute_risk_metrics
+    var_99 = _torch_quantile(losses_t, 0.99)
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 425, in _torch_quantile
+    return torch.quantile(values.to("cpu"), q).to(values.device)
+RuntimeError: quantile() input tensor is too large
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 100000000
+
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 100,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 100,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 100,000,000 Monte Carlo simulations on cpu...
+  Completed in 3.6 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+Traceback (most recent call last):
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 423, in _torch_quantile
+    return torch.quantile(values, q)
+RuntimeError: quantile() input tensor is too large
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/run_monte_carlo_custom_backend.py", line 349, in <module>
+    main()
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/run_monte_carlo_custom_backend.py", line 254, in main
+    metrics = compute_risk_metrics(
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 461, in compute_risk_metrics
+    var_99 = _torch_quantile(losses_t, 0.99)
+  File "/Users/anjanapoduri/git/cecl-credit-loss-modeling/src/monte_carlo_custom_backend.py", line 425, in _torch_quantile
+    return torch.quantile(values.to("cpu"), q).to(values.device)
+RuntimeError: quantile() input tensor is too large
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % PYTORCH_MPS_FAST_MATH=1 PYTORCH_MPS_PREFER_METAL=1 python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 10000000
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 10,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000,000 Monte Carlo simulations on mps...
+  Completed in 0.6 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,326M (6.33%)
+    Std Deviation:          $    11,273M
+    VaR 99%:                $    70,722M (11.68%)
+    VaR 99.9%:              $    84,990M (14.04%)
+    Expected Shortfall 99%: $    76,954M (12.71%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,735M (4.58%)
+    Median:          $    36,220M (5.98%)
+    75th percentile: $    45,434M (7.50%)
+    95th percentile: $    59,578M (9.84%)
+    Maximum:         $   126,432M (20.88%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000,000
+  Expected Loss (mean):  $    38,326M (6.33%)
+  VaR 99%:               $    70,722M (11.68%)
+  VaR 99.9%:             $    84,990M (14.04%)
+  Expected Shortfall:    $    76,954M (12.71%)
+
+  Total time: 35.4 seconds (0.6 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % PYTORCH_MPS_FAST_MATH=1 PYTORCH_MPS_PREFER_METAL=1 python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 10000000
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: cpu
+Simulations: 10,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_cpu
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000,000 Monte Carlo simulations on cpu...
+  Completed in 0.4 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,330M (6.33%)
+    Std Deviation:          $    11,271M
+    VaR 99%:                $    70,718M (11.68%)
+    VaR 99.9%:              $    84,733M (13.99%)
+    Expected Shortfall 99%: $    76,888M (12.70%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,733M (4.58%)
+    Median:          $    36,230M (5.98%)
+    75th percentile: $    45,437M (7.50%)
+    95th percentile: $    59,589M (9.84%)
+    Maximum:         $   141,907M (23.44%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_cpu_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               cpu
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000,000
+  Expected Loss (mean):  $    38,330M (6.33%)
+  VaR 99%:               $    70,718M (11.68%)
+  VaR 99.9%:             $    84,733M (13.99%)
+  Expected Shortfall:    $    76,888M (12.70%)
+
+  Total time: 42.5 seconds (0.7 minutes)
+======================================================================
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % PYTORCH_MPS_FAST_MATH=1 PYTORCH_MPS_PREFER_METAL=1 python src/run_monte_carlo_custom_backend.py --backend mp
+s --n-simulations 10000000 -write-standard-files
+usage: run_monte_carlo_custom_backend.py [-h] [--backend {cpu,mps,cuda}] [--n-simulations N_SIMULATIONS] [--random-seed RANDOM_SEED]
+                                         [--dtype {float16,float32,float64}] [--output-prefix OUTPUT_PREFIX] [--write-standard-files]
+run_monte_carlo_custom_backend.py: error: unrecognized arguments: -write-standard-files
+(ceclenv) anjanapoduri@Mac cecl-credit-loss-modeling % PYTORCH_MPS_FAST_MATH=1 PYTORCH_MPS_PREFER_METAL=1 python src/run_monte_carlo_custom_backend.py --backend mps --n-simulations 10000000 --write-standard-files
+======================================================================
+CECL CREDIT RISK PROJECT - MONTE CARLO CUSTOM BACKEND
+======================================================================
+Backend: mps
+Simulations: 10,000,000
+Dtype: float32
+Random seed: 42
+Output prefix: mc_mps
+
+Step 1: Loading portfolio and scoring baseline...
+  Portfolio: 3,333,454 loans, $605.5B
+  Baseline PD: 12.88%
+  Baseline LGD: 37.67%
+  Baseline Annual EL: $26,390M (4.36%)
+
+======================================================================
+Step 2: Historical macro statistics
+======================================================================
+  Historical macro statistics (from 300 monthly observations):
+    unemployment_rate: mean=5.71, std=1.95
+    hpi_change_annual: mean=4.90, std=6.82
+    gdp_growth_annual: mean=1.50, std=1.71
+
+  Correlation matrix:
+                            unemployment hpi_change_a gdp_growth_a
+          unemployment_rate        1.000       -0.391       -0.321
+          hpi_change_annual       -0.391        1.000        0.377
+          gdp_growth_annual       -0.321        0.377        1.000
+
+======================================================================
+Step 3: Running 10,000,000 Monte Carlo simulations
+======================================================================
+
+  Running 10,000,000 Monte Carlo simulations on mps...
+  Completed in 0.4 seconds
+
+======================================================================
+Step 4: Risk metrics from loss distribution
+======================================================================
+
+  Risk Metrics:
+    Expected Loss (mean):   $    38,326M (6.33%)
+    Std Deviation:          $    11,273M
+    VaR 99%:                $    70,722M (11.68%)
+    VaR 99.9%:              $    84,990M (14.04%)
+    Expected Shortfall 99%: $    76,954M (12.71%)
+
+  Loss Distribution:
+    5th percentile:  $    26,390M (4.36%)
+    25th percentile: $    27,735M (4.58%)
+    Median:          $    36,220M (5.98%)
+    75th percentile: $    45,434M (7.50%)
+    95th percentile: $    59,578M (9.84%)
+    Maximum:         $   126,432M (20.88%)
+
+======================================================================
+Step 5: Sensitivity analysis (tornado chart data)
+======================================================================
+
+  Sensitivity Analysis (one variable at a time):
+
+  unemployment_rate:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.00x     1.00x $     26,390      4.36%      1.00x
+         5.0    1.18x     1.00x $     31,009      5.12%      1.18x
+         6.0    1.43x     1.00x $     37,606      6.21%      1.43x
+         7.0    1.68x     1.00x $     44,204      7.30%      1.68x
+         8.0    1.93x     1.00x $     50,801      8.39%      1.93x
+        10.0    2.42x     1.00x $     63,996     10.57%      2.42x
+        12.0    2.92x     1.00x $     77,192     12.75%      2.92x
+
+  hpi_change_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+        10.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         5.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -5.0    1.35x     1.07x $     38,351      6.33%      1.45x
+       -10.0    1.35x     1.15x $     41,027      6.78%      1.55x
+       -20.0    1.35x     1.30x $     46,378      7.66%      1.76x
+       -30.0    1.35x     1.45x $     51,729      8.54%      1.96x
+
+  gdp_growth_annual:
+       Value  PD Mult  LGD Mult    Loss ($M)  Loss Rate    vs Base
+  ---------- -------- --------- ------------ ---------- ----------
+         4.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         2.0    1.35x     1.00x $     35,675      5.89%      1.35x
+         0.0    1.35x     1.00x $     35,675      5.89%      1.35x
+        -2.0    1.45x     1.00x $     38,314      6.33%      1.45x
+        -4.0    1.55x     1.00x $     40,953      6.76%      1.55x
+        -6.0    1.65x     1.00x $     43,592      7.20%      1.65x
+        -8.0    1.75x     1.00x $     46,231      7.63%      1.75x
+
+======================================================================
+Step 6: Saving results
+======================================================================
+  Also wrote standard dashboard Monte Carlo files.
+  Saved backend-specific outputs:
+    loss_distribution: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_loss_distribution.csv
+    scenarios: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_scenarios.csv
+    risk_metrics: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_risk_metrics.csv
+    sensitivity: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_sensitivity.csv
+    runtime_summary: /Users/anjanapoduri/git/cecl-credit-loss-modeling/models/mc_mps_runtime_summary.csv
+
+======================================================================
+MONTE CARLO CUSTOM BACKEND RESULTS
+======================================================================
+  Backend:               mps
+  Portfolio:             3,333,454 loans, $605.5B
+  Simulations:           10,000,000
+  Expected Loss (mean):  $    38,326M (6.33%)
+  VaR 99%:               $    70,722M (11.68%)
+  VaR 99.9%:             $    84,990M (14.04%)
+  Expected Shortfall:    $    76,954M (12.71%)
+
+  Total time: 66.7 seconds (1.1 minutes)
+======================================================================
