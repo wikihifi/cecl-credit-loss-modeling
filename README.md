@@ -3,11 +3,17 @@
 Original project performs monte carlo simulations at the aggregate level, not at the loan level
 This repo implements a loan-level monte carlo simulation, which is more computationally intensive but allows for more granular risk analysis and better captures the distribution of losses across the portfolio. 
 
-To run:
+To run with a prebuilt engineered portfolio:
 1. clone this repo
-2. download https://github.com/wikihifi/cecl-credit-loss-modeling/releases/download/data-bundle-v1/loan_level_combined.parquet  
-3. run python src/run_monte_carlo_custom_backend.py --backend cpu --n-simulations 1000
-backends available: cpu, mps, cuda 
+2. download https://github.com/wikihifi/cecl-credit-loss-modeling/releases/download/data-bundle-v1/loan_level_combined.parquet
+3. run `python src/run_monte_carlo_custom_backend.py --portfolio-path data/processed/loan_level_combined.parquet --backend cpu --n-simulations 1000`
+
+To build an engineered fullbook from raw `data/parts/*` parquet partitions:
+1. place the raw partitioned files under `data/parts/`
+2. run `python src/build_fullbook_from_parts.py --workers 12`
+3. run Monte Carlo with `python src/run_monte_carlo_custom_backend.py --portfolio-path data/processed/fullbook/loan_level_combined.parquet --backend cpu --n-simulations 1000 --cpu-workers 12 --pyarrow-threads 1`
+
+Backends available: `cpu`, `mps`, `cuda`
 
 # CECL Credit Risk Modeling Pipeline
 

@@ -25,14 +25,31 @@ Notes:
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import os
 import time
 import warnings
+from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+
+
+SCORED_PORTFOLIO_COLUMNS = [
+    "original_upb",
+    "pd_baseline",
+    "lgd_baseline",
+    "pd_sensitivity",
+    "lgd_sensitivity",
+]
+
+
+DEFAULT_CPU_WORKERS = 6
+DEFAULT_TORCH_THREADS_PER_WORKER = 4
+DEFAULT_PYARROW_THREADS = 1
 
 
 def _import_torch():
@@ -117,6 +134,206 @@ def _scenario_tensor_to_dataframe(scenarios_tensor, variable_names: Sequence[str
     return pd.DataFrame(_tensor_to_numpy(scenarios_tensor), columns=list(variable_names))
 
 
+def configure_torch_cpu_threads(num_threads: int | None):
+    """Configure torch CPU thread settings if torch is available."""
+    if num_threads is None:
+        return
+
+    torch = _import_torch()
+    resolved_threads = max(1, int(num_threads))
+    torch.set_num_threads(resolved_threads)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        # Torch only allows setting interop threads once per process.
+        pass
+
+
+def configure_pyarrow_threads(num_threads: int | None):
+    """Configure pyarrow CPU thread usage when available."""
+    if num_threads is None:
+        return
+
+    try:
+        import pyarrow as pa
+    except ImportError:
+        return
+
+    resolved_threads = max(1, int(num_threads))
+    if hasattr(pa, "set_cpu_count"):
+        pa.set_cpu_count(resolved_threads)
+    if hasattr(pa, "set_io_thread_count"):
+        pa.set_io_thread_count(resolved_threads)
+
+
+def resolve_cpu_parallelism(
+    backend: str,
+    cpu_workers: int | None = None,
+    torch_threads_per_worker: int | None = None,
+    pyarrow_threads: int | None = None,
+):
+    """Resolve deterministic CPU parallelism defaults."""
+    cpu_count = os.cpu_count() or 1
+
+    if backend != "cpu":
+        return {
+            "cpu_workers": 1,
+            "torch_threads_per_worker": 1,
+            "pyarrow_threads": pyarrow_threads or DEFAULT_PYARROW_THREADS,
+        }
+
+    resolved_workers = (
+        DEFAULT_CPU_WORKERS if cpu_workers is None else max(1, int(cpu_workers))
+    )
+    resolved_workers = min(resolved_workers, cpu_count)
+
+    if torch_threads_per_worker is None:
+        if resolved_workers == 1:
+            resolved_torch_threads = cpu_count
+        else:
+            resolved_torch_threads = max(
+                1,
+                min(
+                    DEFAULT_TORCH_THREADS_PER_WORKER,
+                    cpu_count // resolved_workers if resolved_workers > 0 else cpu_count,
+                ),
+            )
+    else:
+        resolved_torch_threads = max(1, int(torch_threads_per_worker))
+
+    resolved_pyarrow_threads = (
+        DEFAULT_PYARROW_THREADS
+        if pyarrow_threads is None
+        else max(1, int(pyarrow_threads))
+    )
+
+    return {
+        "cpu_workers": resolved_workers,
+        "torch_threads_per_worker": resolved_torch_threads,
+        "pyarrow_threads": resolved_pyarrow_threads,
+    }
+
+
+def get_execution_mode(
+    backend: str,
+    cpu_workers: int | None = None,
+    portfolio_path=None,
+):
+    """Return a user-facing execution mode label."""
+    if backend == "cpu":
+        if portfolio_path is not None and (cpu_workers or 1) > 1:
+            return "parallel_cpu"
+        return "serial_cpu"
+    return backend
+
+
+def _list_parquet_files(parquet_path) -> list[Path]:
+    """List parquet files from either a single file or nested directory tree."""
+    parquet_path = Path(parquet_path)
+    if parquet_path.is_file():
+        return [parquet_path]
+    return sorted(
+        path for path in parquet_path.rglob("*.parquet") if path.is_file()
+    )
+
+
+def build_scored_portfolio_work_items(
+    parquet_path,
+    columns: Sequence[str] | None = None,
+):
+    """Build deterministic row-group work items for a scored portfolio parquet source."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError(
+            "build_scored_portfolio_work_items requires pyarrow for parquet metadata."
+        ) from exc
+
+    selected_columns = list(columns or SCORED_PORTFOLIO_COLUMNS)
+    work_items = []
+    chunk_id = 0
+
+    for parquet_file in _list_parquet_files(parquet_path):
+        parquet_reader = pq.ParquetFile(parquet_file)
+        for row_group_index in range(parquet_reader.num_row_groups):
+            work_items.append(
+                {
+                    "chunk_id": chunk_id,
+                    "file_path": str(parquet_file),
+                    "row_group_index": row_group_index,
+                    "columns": selected_columns,
+                }
+            )
+            chunk_id += 1
+
+    if not work_items:
+        raise FileNotFoundError(f"No parquet files found under {parquet_path}")
+
+    return work_items
+
+
+def iter_scored_portfolio_chunks(
+    parquet_path,
+    batch_size: int = 100_000,
+    columns: Sequence[str] | None = None,
+):
+    """
+    Stream a scored portfolio parquet in bounded batches.
+
+    The parquet is expected to contain the compact Monte Carlo inputs:
+    `original_upb`, `pd_baseline`, `lgd_baseline`, `pd_sensitivity`,
+    and `lgd_sensitivity`.
+    """
+    try:
+        import pyarrow.dataset as ds
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError(
+            "iter_scored_portfolio_chunks requires pyarrow for parquet batch reads."
+        ) from exc
+
+    selected_columns = list(columns or SCORED_PORTFOLIO_COLUMNS)
+    parquet_path = Path(parquet_path)
+
+    if parquet_path.is_file():
+        parquet_file = pq.ParquetFile(parquet_path)
+        batch_iter = parquet_file.iter_batches(
+            batch_size=batch_size,
+            columns=selected_columns,
+        )
+    else:
+        dataset = ds.dataset(parquet_path, format="parquet", partitioning="hive")
+        batch_iter = dataset.to_batches(
+            batch_size=batch_size,
+            columns=selected_columns,
+        )
+
+    for record_batch in batch_iter:
+        batch_df = record_batch.to_pandas()
+        yield {col: batch_df[col].to_numpy(copy=False) for col in selected_columns}
+
+
+def load_scored_portfolio_work_item(work_item):
+    """Load a deterministic scored portfolio work item into NumPy arrays."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError(
+            "load_scored_portfolio_work_item requires pyarrow for row-group reads."
+        ) from exc
+
+    parquet_file = pq.ParquetFile(work_item["file_path"])
+    table = parquet_file.read_row_group(
+        work_item["row_group_index"],
+        columns=work_item["columns"],
+    )
+    batch_df = table.to_pandas()
+    return {
+        col: batch_df[col].to_numpy(copy=False)
+        for col in work_item["columns"]
+    }
+
+
 def _prepare_portfolio_tensors(
     portfolio_upb,
     pd_baseline,
@@ -153,6 +370,19 @@ def _prepare_portfolio_tensors(
         lgd_sensitivity_t,
         device,
         torch_dtype,
+    )
+
+
+def _prepare_portfolio_chunk_tensors(portfolio_chunk, backend, dtype):
+    """Convert a portfolio chunk mapping into tensors on the requested backend."""
+    return _prepare_portfolio_tensors(
+        portfolio_upb=portfolio_chunk["original_upb"],
+        pd_baseline=portfolio_chunk["pd_baseline"],
+        lgd_baseline=portfolio_chunk["lgd_baseline"],
+        pd_sensitivity=portfolio_chunk.get("pd_sensitivity"),
+        lgd_sensitivity=portfolio_chunk.get("lgd_sensitivity"),
+        backend=backend,
+        dtype=dtype,
     )
 
 
@@ -465,6 +695,194 @@ def _aggregate_portfolio_losses_tensor(
     return losses_t, total_balance_t
 
 
+def _aggregate_portfolio_losses_from_chunks(
+    portfolio_chunks,
+    multipliers_t,
+    backend: str,
+    dtype,
+    scenario_batch_size: int,
+    loan_chunk_size: int,
+):
+    """Aggregate scenario losses by streaming portfolio chunks."""
+    torch = _import_torch()
+
+    losses_t = torch.zeros(
+        multipliers_t.shape[0],
+        device=multipliers_t.device,
+        dtype=multipliers_t.dtype,
+    )
+    total_balance_t = torch.zeros(
+        (),
+        device=multipliers_t.device,
+        dtype=multipliers_t.dtype,
+    )
+
+    for portfolio_chunk in portfolio_chunks:
+        (
+            portfolio_upb_t,
+            pd_baseline_t,
+            lgd_baseline_t,
+            pd_sensitivity_t,
+            lgd_sensitivity_t,
+            _,
+            _,
+        ) = _prepare_portfolio_chunk_tensors(
+            portfolio_chunk=portfolio_chunk,
+            backend=backend,
+            dtype=dtype,
+        )
+
+        chunk_losses_t, chunk_total_balance_t = _aggregate_portfolio_losses_tensor(
+            portfolio_upb_t=portfolio_upb_t,
+            pd_baseline_t=pd_baseline_t,
+            lgd_baseline_t=lgd_baseline_t,
+            pd_sensitivity_t=pd_sensitivity_t,
+            lgd_sensitivity_t=lgd_sensitivity_t,
+            multipliers_t=multipliers_t,
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+        )
+        losses_t = losses_t + chunk_losses_t
+        total_balance_t = total_balance_t + chunk_total_balance_t
+
+    return losses_t, total_balance_t
+
+
+def _init_cpu_parallel_worker(torch_threads_per_worker: int, pyarrow_threads: int):
+    """Initialize a CPU aggregation worker with deterministic thread settings."""
+    os.environ["OMP_NUM_THREADS"] = str(torch_threads_per_worker)
+    os.environ["MKL_NUM_THREADS"] = str(torch_threads_per_worker)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(torch_threads_per_worker)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(torch_threads_per_worker)
+    configure_torch_cpu_threads(torch_threads_per_worker)
+    configure_pyarrow_threads(pyarrow_threads)
+
+
+def _compute_partial_losses_for_work_item(task):
+    """Worker task for deterministic CPU portfolio aggregation."""
+    torch = _import_torch()
+
+    work_item = task["work_item"]
+    multipliers_np = task["multipliers"]
+    dtype = task["dtype"]
+    scenario_batch_size = task["scenario_batch_size"]
+    loan_chunk_size = task["loan_chunk_size"]
+
+    portfolio_chunk = load_scored_portfolio_work_item(work_item)
+    multipliers_t = torch.as_tensor(multipliers_np, dtype=getattr(torch, dtype))
+
+    (
+        portfolio_upb_t,
+        pd_baseline_t,
+        lgd_baseline_t,
+        pd_sensitivity_t,
+        lgd_sensitivity_t,
+        _,
+        _,
+    ) = _prepare_portfolio_chunk_tensors(
+        portfolio_chunk=portfolio_chunk,
+        backend="cpu",
+        dtype=dtype,
+    )
+
+    chunk_losses_t, chunk_total_balance_t = _aggregate_portfolio_losses_tensor(
+        portfolio_upb_t=portfolio_upb_t,
+        pd_baseline_t=pd_baseline_t,
+        lgd_baseline_t=lgd_baseline_t,
+        pd_sensitivity_t=pd_sensitivity_t,
+        lgd_sensitivity_t=lgd_sensitivity_t,
+        multipliers_t=multipliers_t,
+        scenario_batch_size=scenario_batch_size,
+        loan_chunk_size=loan_chunk_size,
+    )
+
+    return {
+        "chunk_id": work_item["chunk_id"],
+        "losses": chunk_losses_t.detach().numpy(),
+        "total_balance": float(chunk_total_balance_t.detach().numpy()),
+    }
+
+
+def _aggregate_portfolio_losses_parallel_cpu(
+    portfolio_path,
+    multipliers_t,
+    dtype,
+    scenario_batch_size: int,
+    loan_chunk_size: int,
+    cpu_workers: int,
+    torch_threads_per_worker: int,
+    pyarrow_threads: int,
+):
+    """Aggregate portfolio losses across CPU workers with deterministic reduction order."""
+    torch = _import_torch()
+
+    work_items = build_scored_portfolio_work_items(
+        portfolio_path,
+        columns=SCORED_PORTFOLIO_COLUMNS,
+    )
+    losses_t = torch.zeros(
+        multipliers_t.shape[0],
+        device=multipliers_t.device,
+        dtype=multipliers_t.dtype,
+    )
+    total_balance_t = torch.zeros(
+        (),
+        device=multipliers_t.device,
+        dtype=multipliers_t.dtype,
+    )
+    multipliers_np = _tensor_to_numpy(multipliers_t)
+
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(
+        processes=cpu_workers,
+        initializer=_init_cpu_parallel_worker,
+        initargs=(torch_threads_per_worker, pyarrow_threads),
+    ) as pool:
+        for start_scenario in range(0, multipliers_np.shape[0], scenario_batch_size):
+            end_scenario = min(start_scenario + scenario_batch_size, multipliers_np.shape[0])
+            batch_multipliers = multipliers_np[start_scenario:end_scenario]
+            tasks = [
+                {
+                    "work_item": work_item,
+                    "multipliers": batch_multipliers,
+                    "dtype": dtype,
+                    "scenario_batch_size": scenario_batch_size,
+                    "loan_chunk_size": loan_chunk_size,
+                }
+                for work_item in work_items
+            ]
+            partial_results = pool.map(
+                _compute_partial_losses_for_work_item,
+                tasks,
+                chunksize=1,
+            )
+
+            partial_results.sort(key=lambda item: item["chunk_id"])
+            batch_losses = torch.zeros(
+                end_scenario - start_scenario,
+                device=multipliers_t.device,
+                dtype=multipliers_t.dtype,
+            )
+            batch_total_balance = 0.0
+            for partial in partial_results:
+                batch_losses = batch_losses + torch.as_tensor(
+                    partial["losses"],
+                    device=multipliers_t.device,
+                    dtype=multipliers_t.dtype,
+                )
+                batch_total_balance += partial["total_balance"]
+
+            losses_t[start_scenario:end_scenario] = batch_losses
+            if start_scenario == 0:
+                total_balance_t = torch.as_tensor(
+                    batch_total_balance,
+                    device=multipliers_t.device,
+                    dtype=multipliers_t.dtype,
+                )
+
+    return losses_t, total_balance_t
+
+
 def compute_scenario_multipliers(
     scenarios,
     variable_names: Sequence[str] | None = None,
@@ -530,6 +948,11 @@ def compute_scenario_losses(
     dtype: str | None = "float32",
     scenario_batch_size: int = 128,
     loan_chunk_size: int = 100_000,
+    portfolio_path=None,
+    portfolio_chunks=None,
+    cpu_workers: int = 1,
+    torch_threads_per_worker: int = 1,
+    pyarrow_threads: int = DEFAULT_PYARROW_THREADS,
     return_tensors: bool = False,
 ):
     """Score an explicit set of macro scenarios against the portfolio."""
@@ -539,40 +962,66 @@ def compute_scenario_losses(
         backend=backend,
         dtype=dtype,
     )
-    (
-        portfolio_upb_t,
-        pd_baseline_t,
-        lgd_baseline_t,
-        pd_sensitivity_t,
-        lgd_sensitivity_t,
-        _,
-        _,
-    ) = _prepare_portfolio_tensors(
-        portfolio_upb=portfolio_upb,
-        pd_baseline=pd_baseline,
-        lgd_baseline=lgd_baseline,
-        pd_sensitivity=pd_sensitivity,
-        lgd_sensitivity=lgd_sensitivity,
-        backend=backend,
-        dtype=dtype,
-    )
-
     multipliers_t, multiplier_names = _compute_scenario_multipliers_tensor(
         scenarios_tensor=scenarios_tensor,
         variable_names=scenario_names,
         baseline_ur=baseline_ur,
         baseline_hpi_change=baseline_hpi_change,
     )
-    losses_t, total_balance_t = _aggregate_portfolio_losses_tensor(
-        portfolio_upb_t=portfolio_upb_t,
-        pd_baseline_t=pd_baseline_t,
-        lgd_baseline_t=lgd_baseline_t,
-        pd_sensitivity_t=pd_sensitivity_t,
-        lgd_sensitivity_t=lgd_sensitivity_t,
-        multipliers_t=multipliers_t,
-        scenario_batch_size=scenario_batch_size,
-        loan_chunk_size=loan_chunk_size,
+    execution_mode = get_execution_mode(
+        backend=backend,
+        cpu_workers=cpu_workers,
+        portfolio_path=portfolio_path,
     )
+
+    if execution_mode == "parallel_cpu":
+        losses_t, total_balance_t = _aggregate_portfolio_losses_parallel_cpu(
+            portfolio_path=portfolio_path,
+            multipliers_t=multipliers_t,
+            dtype=dtype or "float32",
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+            cpu_workers=cpu_workers,
+            torch_threads_per_worker=torch_threads_per_worker,
+            pyarrow_threads=pyarrow_threads,
+        )
+    elif portfolio_chunks is None:
+        (
+            portfolio_upb_t,
+            pd_baseline_t,
+            lgd_baseline_t,
+            pd_sensitivity_t,
+            lgd_sensitivity_t,
+            _,
+            _,
+        ) = _prepare_portfolio_tensors(
+            portfolio_upb=portfolio_upb,
+            pd_baseline=pd_baseline,
+            lgd_baseline=lgd_baseline,
+            pd_sensitivity=pd_sensitivity,
+            lgd_sensitivity=lgd_sensitivity,
+            backend=backend,
+            dtype=dtype,
+        )
+        losses_t, total_balance_t = _aggregate_portfolio_losses_tensor(
+            portfolio_upb_t=portfolio_upb_t,
+            pd_baseline_t=pd_baseline_t,
+            lgd_baseline_t=lgd_baseline_t,
+            pd_sensitivity_t=pd_sensitivity_t,
+            lgd_sensitivity_t=lgd_sensitivity_t,
+            multipliers_t=multipliers_t,
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+        )
+    else:
+        losses_t, total_balance_t = _aggregate_portfolio_losses_from_chunks(
+            portfolio_chunks=portfolio_chunks,
+            multipliers_t=multipliers_t,
+            backend=backend,
+            dtype=dtype,
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+        )
     loss_rate_t = losses_t / total_balance_t
 
     if return_tensors:
@@ -690,6 +1139,11 @@ def run_monte_carlo(
     dtype: str | None = "float32",
     scenario_batch_size: int = 128,
     loan_chunk_size: int = 100_000,
+    portfolio_path=None,
+    portfolio_chunks=None,
+    cpu_workers: int = 1,
+    torch_threads_per_worker: int = 1,
+    pyarrow_threads: int = DEFAULT_PYARROW_THREADS,
     return_tensors: bool = False,
 ):
     """
@@ -724,23 +1178,7 @@ def run_monte_carlo(
     return_tensors : bool
         If True, return torch tensors instead of NumPy/DataFrame objects.
     """
-    (
-        portfolio_upb_t,
-        pd_baseline_t,
-        lgd_baseline_t,
-        pd_sensitivity_t,
-        lgd_sensitivity_t,
-        device,
-        torch_dtype,
-    ) = _prepare_portfolio_tensors(
-        portfolio_upb=portfolio_upb,
-        pd_baseline=pd_baseline,
-        lgd_baseline=lgd_baseline,
-        pd_sensitivity=pd_sensitivity,
-        lgd_sensitivity=lgd_sensitivity,
-        backend=backend,
-        dtype=dtype,
-    )
+    device = resolve_backend_device(backend)
     print(f"\n  Running {n_simulations:,} Monte Carlo simulations on {device.type}...")
     t0 = time.time()
 
@@ -757,16 +1195,60 @@ def run_monte_carlo(
         variable_names=variable_names,
     )
 
-    losses_t, total_balance_t = _aggregate_portfolio_losses_tensor(
-        portfolio_upb_t=portfolio_upb_t,
-        pd_baseline_t=pd_baseline_t,
-        lgd_baseline_t=lgd_baseline_t,
-        pd_sensitivity_t=pd_sensitivity_t,
-        lgd_sensitivity_t=lgd_sensitivity_t,
-        multipliers_t=multipliers_t,
-        scenario_batch_size=scenario_batch_size,
-        loan_chunk_size=loan_chunk_size,
+    execution_mode = get_execution_mode(
+        backend=backend,
+        cpu_workers=cpu_workers,
+        portfolio_path=portfolio_path,
     )
+
+    if execution_mode == "parallel_cpu":
+        losses_t, total_balance_t = _aggregate_portfolio_losses_parallel_cpu(
+            portfolio_path=portfolio_path,
+            multipliers_t=multipliers_t,
+            dtype=dtype or "float32",
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+            cpu_workers=cpu_workers,
+            torch_threads_per_worker=torch_threads_per_worker,
+            pyarrow_threads=pyarrow_threads,
+        )
+    elif portfolio_chunks is None:
+        (
+            portfolio_upb_t,
+            pd_baseline_t,
+            lgd_baseline_t,
+            pd_sensitivity_t,
+            lgd_sensitivity_t,
+            _,
+            _,
+        ) = _prepare_portfolio_tensors(
+            portfolio_upb=portfolio_upb,
+            pd_baseline=pd_baseline,
+            lgd_baseline=lgd_baseline,
+            pd_sensitivity=pd_sensitivity,
+            lgd_sensitivity=lgd_sensitivity,
+            backend=backend,
+            dtype=dtype,
+        )
+        losses_t, total_balance_t = _aggregate_portfolio_losses_tensor(
+            portfolio_upb_t=portfolio_upb_t,
+            pd_baseline_t=pd_baseline_t,
+            lgd_baseline_t=lgd_baseline_t,
+            pd_sensitivity_t=pd_sensitivity_t,
+            lgd_sensitivity_t=lgd_sensitivity_t,
+            multipliers_t=multipliers_t,
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+        )
+    else:
+        losses_t, total_balance_t = _aggregate_portfolio_losses_from_chunks(
+            portfolio_chunks=portfolio_chunks,
+            multipliers_t=multipliers_t,
+            backend=backend,
+            dtype=dtype,
+            scenario_batch_size=scenario_batch_size,
+            loan_chunk_size=loan_chunk_size,
+        )
     loss_rate_t = losses_t / total_balance_t
 
     elapsed = time.time() - t0
@@ -785,11 +1267,17 @@ def run_monte_carlo(
 
 
 __all__ = [
+    "build_scored_portfolio_work_items",
+    "configure_pyarrow_threads",
+    "configure_torch_cpu_threads",
     "compute_historical_macro_stats",
     "generate_correlated_scenarios",
+    "get_execution_mode",
     "compute_scenario_multipliers",
     "compute_scenario_losses",
+    "iter_scored_portfolio_chunks",
     "compute_risk_metrics",
+    "resolve_cpu_parallelism",
     "run_monte_carlo",
     "resolve_backend_device",
 ]

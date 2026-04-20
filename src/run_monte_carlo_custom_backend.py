@@ -40,16 +40,48 @@ sys.path.insert(0, str(project_root / "src"))
 from pd_model import apply_woe_transformation
 from loan_specific_multipliers import build_loan_specific_sensitivities
 from monte_carlo_custom_backend import (
+    configure_pyarrow_threads,
+    configure_torch_cpu_threads,
     compute_historical_macro_stats,
     compute_risk_metrics,
     compute_scenario_losses,
+    get_execution_mode,
+    iter_scored_portfolio_chunks,
+    resolve_cpu_parallelism,
     run_monte_carlo,
 )
 
 
 COMBINED_PATH = project_root / "data" / "processed" / "loan_level_combined.parquet"
+PARTITIONED_DATASET_PATH = project_root / "data" / "parts"
 MACRO_PATH = project_root / "data" / "processed" / "macro" / "fred_macro_monthly.csv"
 MODEL_DIR = project_root / "models"
+SENSITIVITY_REQUIRED_COLUMNS = {
+    "original_upb",
+    "data_split",
+    "default_flag",
+    "lgd",
+    "fico_bucket",
+    "borrower_credit_score",
+    "ltv_bucket",
+    "original_ltv",
+    "fico_missing",
+    "has_mortgage_insurance",
+    "msa",
+    "property_state",
+    "is_cashout_refi",
+    "loan_purpose",
+    "is_refi_nocashout",
+    "is_investment_property",
+    "occupancy_status",
+    "is_second_home",
+    "is_condo",
+    "property_type",
+    "is_manufactured_housing",
+    "is_multi_unit",
+    "number_of_units",
+    "amortization_type",
+}
 
 
 def parse_args():
@@ -109,6 +141,32 @@ def parse_args():
         default=100_000,
         help="Loans per chunk for loan-level aggregation.",
     )
+    parser.add_argument(
+        "--cpu-workers",
+        type=int,
+        default=None,
+        help="CPU worker processes for deterministic application-level parallelism.",
+    )
+    parser.add_argument(
+        "--torch-threads-per-worker",
+        type=int,
+        default=None,
+        help="Torch CPU threads to use inside each CPU worker process.",
+    )
+    parser.add_argument(
+        "--pyarrow-threads",
+        type=int,
+        default=1,
+        help="PyArrow CPU threads per process for parquet scanning and row-group reads.",
+    )
+    parser.add_argument(
+        "--portfolio-path",
+        default=None,
+        help=(
+            "Optional path to the engineered portfolio parquet or parquet dataset "
+            "to score. Overrides the default search order."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -123,6 +181,126 @@ def resolve_macro_path():
                 f"Macro data not found at {MACRO_PATH} or {alt_path}"
             )
     return macro_path
+
+
+def resolve_portfolio_path(portfolio_path_override=None):
+    """Resolve the portfolio source, honoring an explicit override when provided."""
+    if portfolio_path_override:
+        portfolio_path = Path(portfolio_path_override)
+        if portfolio_path.exists():
+            return portfolio_path
+        raise FileNotFoundError(f"Portfolio path not found: {portfolio_path}")
+
+    if PARTITIONED_DATASET_PATH.exists():
+        return PARTITIONED_DATASET_PATH
+    if COMBINED_PATH.exists():
+        return COMBINED_PATH
+    raise FileNotFoundError(
+        f"Portfolio data not found at {PARTITIONED_DATASET_PATH} or {COMBINED_PATH}"
+    )
+
+
+def read_portfolio_parquet(parquet_path, columns=None):
+    """
+    Read either a single parquet file or a partitioned parquet dataset.
+
+    Uses a dataset scan for directory inputs so nested partition folders work
+    regardless of depth.
+    """
+    parquet_path = Path(parquet_path)
+    if parquet_path.is_file():
+        return pd.read_parquet(parquet_path, columns=columns)
+
+    try:
+        import pyarrow.dataset as ds
+    except ImportError as exc:
+        raise ImportError(
+            "Reading a partitioned parquet dataset requires pyarrow.dataset."
+        ) from exc
+
+    dataset = ds.dataset(parquet_path, format="parquet", partitioning="hive")
+    table = dataset.to_table(columns=columns)
+    return table.to_pandas()
+
+
+def list_portfolio_files(parquet_path):
+    """List parquet files for lightweight dataset logging."""
+    parquet_path = Path(parquet_path)
+    if parquet_path.is_file():
+        return [parquet_path]
+    return sorted(path for path in parquet_path.rglob("*.parquet") if path.is_file())
+
+
+def get_portfolio_schema_columns(parquet_path):
+    """Read parquet schema column names without loading the dataset into pandas."""
+    parquet_path = Path(parquet_path)
+    if parquet_path.is_file():
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as exc:
+            raise ImportError("Reading parquet schema requires pyarrow.") from exc
+        return pq.ParquetFile(parquet_path).schema.names
+
+    try:
+        import pyarrow.dataset as ds
+    except ImportError as exc:
+        raise ImportError("Reading parquet schema requires pyarrow.dataset.") from exc
+
+    dataset = ds.dataset(parquet_path, format="parquet", partitioning="hive")
+    return dataset.schema.names
+
+
+def build_step1_required_columns(pd_features, lgd_features):
+    """Build the minimum column set needed for Step 1 scoring and sensitivity calibration."""
+    return sorted(set(pd_features) | set(lgd_features) | SENSITIVITY_REQUIRED_COLUMNS)
+
+
+def resolve_compatible_portfolio_path(required_columns, portfolio_path_override=None):
+    """
+    Choose a portfolio source that actually contains the engineered columns
+    needed by the Monte Carlo runner.
+    """
+    candidate_paths = []
+    if portfolio_path_override:
+        candidate_paths.append(resolve_portfolio_path(portfolio_path_override))
+    else:
+        if PARTITIONED_DATASET_PATH.exists():
+            candidate_paths.append(PARTITIONED_DATASET_PATH)
+        if COMBINED_PATH.exists():
+            candidate_paths.append(COMBINED_PATH)
+
+    compatibility_rows = []
+    for candidate in candidate_paths:
+        available_columns = set(get_portfolio_schema_columns(candidate))
+        matched = sorted(set(required_columns) & available_columns)
+        missing = sorted(set(required_columns) - available_columns)
+        compatibility_rows.append(
+            {
+                "path": candidate,
+                "matched_columns": matched,
+                "missing_columns": missing,
+            }
+        )
+
+    if not compatibility_rows:
+        if portfolio_path_override:
+            raise FileNotFoundError(f"Portfolio path not found: {portfolio_path_override}")
+        raise FileNotFoundError(
+            f"Portfolio data not found at {PARTITIONED_DATASET_PATH} or {COMBINED_PATH}"
+        )
+
+    best_match = max(compatibility_rows, key=lambda row: len(row["matched_columns"]))
+    if "original_upb" in best_match["matched_columns"]:
+        return best_match["path"], best_match["matched_columns"], best_match["missing_columns"]
+
+    missing_preview = ", ".join(best_match["missing_columns"][:12])
+    suffix = " ..." if len(best_match["missing_columns"]) > 12 else ""
+    raise ValueError(
+        "No compatible engineered portfolio dataset was found for Monte Carlo scoring. "
+        f"Best candidate was {best_match['path']} but it is missing required columns such as: "
+        f"{missing_preview}{suffix}. "
+        "The runner expects the engineered loan-level dataset, not the raw partitioned source."
+    )
 
 
 def save_outputs(output_prefix, losses, scenarios, metrics, sensitivity_df, loan_sensitivity_summary):
@@ -166,22 +344,90 @@ def write_standard_files(losses, scenarios, metrics, sensitivity_df):
     sensitivity_df.to_csv(MODEL_DIR / "mc_sensitivity.csv", index=False)
 
 
-def sensitivity_analysis_custom(
+def write_scored_portfolio_parquet(
+    output_path,
     portfolio_upb,
     pd_baseline,
     lgd_baseline,
-    macro_stats,
     pd_sensitivity,
     lgd_sensitivity,
+    row_group_size,
+):
+    """Persist the compact Monte Carlo inputs so later steps can stream them."""
+    scored_portfolio = pd.DataFrame({
+        "original_upb": np.asarray(portfolio_upb, dtype=np.float32),
+        "pd_baseline": np.asarray(pd_baseline, dtype=np.float32),
+        "lgd_baseline": np.asarray(lgd_baseline, dtype=np.float32),
+        "pd_sensitivity": np.asarray(pd_sensitivity, dtype=np.float32),
+        "lgd_sensitivity": np.asarray(lgd_sensitivity, dtype=np.float32),
+    })
+    scored_portfolio.to_parquet(
+        output_path,
+        engine="pyarrow",
+        index=False,
+        row_group_size=row_group_size,
+    )
+    return output_path
+
+
+def log_series_quality(name, values):
+    """Print null/non-finite diagnostics for a 1D array-like input."""
+    arr = np.asarray(values)
+    null_mask = pd.isna(arr)
+    null_count = int(null_mask.sum())
+
+    finite_mask = np.ones(arr.shape, dtype=bool)
+    try:
+        numeric_arr = arr.astype(float)
+        finite_mask = np.isfinite(numeric_arr)
+    except (TypeError, ValueError):
+        pass
+
+    non_finite_count = int((~finite_mask & ~null_mask).sum())
+    print(
+        f"    {name}: nulls={null_count:,}, non_finite={non_finite_count:,}, "
+        f"rows={len(arr):,}"
+    )
+
+
+def build_valid_scoring_mask(
+    portfolio_upb,
+    pd_baseline,
+    lgd_baseline,
+    pd_sensitivity,
+    lgd_sensitivity,
+):
+    """Return the rows that are safe to pass into Monte Carlo aggregation."""
+    masks = []
+    for values in [
+        portfolio_upb,
+        pd_baseline,
+        lgd_baseline,
+        pd_sensitivity,
+        lgd_sensitivity,
+    ]:
+        arr = np.asarray(values, dtype=float)
+        masks.append(np.isfinite(arr))
+    combined_mask = masks[0]
+    for mask in masks[1:]:
+        combined_mask = combined_mask & mask
+    return combined_mask
+
+
+def sensitivity_analysis_custom(
+    scored_portfolio_path,
+    total_balance,
+    baseline_loss,
+    macro_stats,
     backend,
     dtype,
     scenario_batch_size,
     loan_chunk_size,
+    cpu_workers,
+    torch_threads_per_worker,
+    pyarrow_threads,
 ):
     """One-at-a-time sensitivity analysis using loan-specific multipliers."""
-    total_balance = portfolio_upb.sum()
-    baseline_loss = float((portfolio_upb * pd_baseline * lgd_baseline).sum())
-
     variables_to_shock = {
         "unemployment_rate": [4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0],
         "hpi_change_annual": [10.0, 5.0, 0.0, -5.0, -10.0, -20.0, -30.0],
@@ -204,16 +450,22 @@ def sensitivity_analysis_custom(
 
         scenarios_df = pd.DataFrame(scenario_rows)
         losses, scored = compute_scenario_losses(
-            portfolio_upb=portfolio_upb,
-            pd_baseline=pd_baseline,
-            lgd_baseline=lgd_baseline,
+            portfolio_upb=None,
+            pd_baseline=None,
+            lgd_baseline=None,
             scenarios=scenarios_df,
-            pd_sensitivity=pd_sensitivity,
-            lgd_sensitivity=lgd_sensitivity,
+            portfolio_path=scored_portfolio_path,
+            portfolio_chunks=iter_scored_portfolio_chunks(
+                scored_portfolio_path,
+                batch_size=loan_chunk_size,
+            ),
             backend=backend,
             dtype=dtype,
             scenario_batch_size=scenario_batch_size,
             loan_chunk_size=loan_chunk_size,
+            cpu_workers=cpu_workers,
+            torch_threads_per_worker=torch_threads_per_worker,
+            pyarrow_threads=pyarrow_threads,
         )
 
         print(f"\n  {var_name}:")
@@ -247,6 +499,25 @@ def sensitivity_analysis_custom(
 def main():
     args = parse_args()
     output_prefix = args.output_prefix or f"mc_{args.backend}"
+    cpu_parallelism = resolve_cpu_parallelism(
+        backend=args.backend,
+        cpu_workers=args.cpu_workers,
+        torch_threads_per_worker=args.torch_threads_per_worker,
+        pyarrow_threads=args.pyarrow_threads,
+    )
+    execution_mode = get_execution_mode(
+        backend=args.backend,
+        cpu_workers=cpu_parallelism["cpu_workers"],
+        portfolio_path="streamed_scored_portfolio",
+    )
+
+    if args.backend == "cpu":
+        parent_torch_threads = (
+            1 if cpu_parallelism["cpu_workers"] > 1
+            else cpu_parallelism["torch_threads_per_worker"]
+        )
+        configure_torch_cpu_threads(parent_torch_threads)
+        configure_pyarrow_threads(cpu_parallelism["pyarrow_threads"])
 
     t_total_start = time.time()
     timings = {}
@@ -260,6 +531,11 @@ def main():
     print(f"Random seed: {args.random_seed}")
     print(f"Scenario batch size: {args.scenario_batch_size:,}")
     print(f"Loan chunk size: {args.loan_chunk_size:,}")
+    print(f"Execution mode: {execution_mode}")
+    if args.backend == "cpu":
+        print(f"CPU workers: {cpu_parallelism['cpu_workers']}")
+        print(f"Torch threads/worker: {cpu_parallelism['torch_threads_per_worker']}")
+        print(f"PyArrow threads/process: {cpu_parallelism['pyarrow_threads']}")
     print(f"Output prefix: {output_prefix}")
 
     # ------------------------------------------------------------------
@@ -268,26 +544,58 @@ def main():
     step_start = time.time()
     print("\nStep 1: Loading portfolio and scoring baseline...")
 
-    df = pd.read_parquet(COMBINED_PATH)
-    df.loc[df["data_split"] == "unknown", "data_split"] = "train"
-    total_balance = df["original_upb"].sum()
-    portfolio_upb = df["original_upb"].values.astype(float)
-    print(f"  Portfolio: {len(df):,} loans, ${total_balance/1e9:.1f}B")
-
     pd_model = joblib.load(MODEL_DIR / "pd_logistic_regression.pkl")
     woe_results = joblib.load(MODEL_DIR / "woe_results.pkl")
     with open(MODEL_DIR / "selected_features.txt") as f:
         pd_features = [line.strip() for line in f if line.strip()]
 
-    X_woe = apply_woe_transformation(df, woe_results, pd_features)
-    pd_baseline = pd_model.predict_proba(X_woe)[:, 1]
-    del X_woe
-    gc.collect()
-
     lgd_model = joblib.load(MODEL_DIR / "lgd_ols.pkl")
     with open(MODEL_DIR / "lgd_features.txt") as f:
         lgd_features = [line.strip() for line in f if line.strip()]
 
+    required_columns = build_step1_required_columns(pd_features, lgd_features)
+    portfolio_path, selected_columns, missing_columns = resolve_compatible_portfolio_path(
+        required_columns,
+        portfolio_path_override=args.portfolio_path,
+    )
+    print(f"  Portfolio source: {portfolio_path}")
+    portfolio_files = list_portfolio_files(portfolio_path)
+
+    print(f"  Portfolio parquet files: {len(portfolio_files):,}")
+    print(f"  Step 1 requested columns: {len(required_columns):,}")
+    print(f"  Step 1 selected columns:  {len(selected_columns):,}")
+    if missing_columns:
+        preview = ", ".join(missing_columns[:10])
+        suffix = " ..." if len(missing_columns) > 10 else ""
+        print(f"  Missing optional columns: {preview}{suffix}")
+
+    load_start = time.time()
+    print("  Loading reduced portfolio frame into pandas...")
+    df = read_portfolio_parquet(portfolio_path, columns=selected_columns)
+    load_elapsed = time.time() - load_start
+    df_memory_mb = df.memory_usage(deep=True).sum() / (1024 ** 2)
+    print(
+        f"  Loaded {len(df):,} rows x {len(df.columns):,} columns "
+        f"in {load_elapsed:.1f}s ({df_memory_mb:,.0f} MB in memory)"
+    )
+    if "data_split" in df.columns:
+        df.loc[df["data_split"] == "unknown", "data_split"] = "train"
+    else:
+        print("  Column 'data_split' not found; defaulting all rows to 'train'.")
+        df["data_split"] = "train"
+    n_loans = len(df)
+    total_balance = df["original_upb"].sum()
+    portfolio_upb = df["original_upb"].values.astype(float)
+    print(f"  Portfolio: {n_loans:,} loans, ${total_balance/1e9:.1f}B")
+
+    print(f"  Applying WoE transform for {len(pd_features):,} PD features...")
+    X_woe = apply_woe_transformation(df, woe_results, pd_features)
+    print(f"  Scoring PD model on matrix shape {X_woe.shape}...")
+    pd_baseline = pd_model.predict_proba(X_woe)[:, 1]
+    del X_woe
+    gc.collect()
+
+    print(f"  Preparing LGD features for {len(lgd_features):,} columns...")
     X_lgd = df[lgd_features].copy()
     lgd_fill = {"loan_age_at_default": 48.0, "was_modified": 0.0}
     for col in lgd_features:
@@ -295,6 +603,7 @@ def main():
             X_lgd[col] = X_lgd[col].fillna(lgd_fill[col])
         else:
             X_lgd[col] = X_lgd[col].fillna(X_lgd[col].median())
+    print(f"  Scoring LGD model on matrix shape {X_lgd.shape}...")
     lgd_baseline = lgd_model.predict(X_lgd)
     lgd_baseline = np.clip(lgd_baseline, 0.0, 1.0)
     del X_lgd
@@ -335,9 +644,67 @@ def main():
         f"State fallback={loan_sensitivity_summary['state_share'].iloc[0]*100:.1f}%, "
         f"Neutral={loan_sensitivity_summary['neutral_share'].iloc[0]*100:.1f}%"
     )
+
+    print("  Monte Carlo scoring input quality:")
+    log_series_quality("original_upb", portfolio_upb)
+    log_series_quality("pd_baseline", pd_baseline)
+    log_series_quality("lgd_baseline", lgd_baseline)
+    log_series_quality("pd_sensitivity", pd_sensitivity)
+    log_series_quality("lgd_sensitivity", lgd_sensitivity)
+
+    valid_scoring_mask = build_valid_scoring_mask(
+        portfolio_upb=portfolio_upb,
+        pd_baseline=pd_baseline,
+        lgd_baseline=lgd_baseline,
+        pd_sensitivity=pd_sensitivity,
+        lgd_sensitivity=lgd_sensitivity,
+    )
+    invalid_rows = int((~valid_scoring_mask).sum())
+    if invalid_rows > 0:
+        print(
+            f"  Dropping {invalid_rows:,} row(s) with invalid Monte Carlo inputs "
+            "before writing the scored portfolio."
+        )
+        df = df.loc[valid_scoring_mask].copy()
+        portfolio_upb = portfolio_upb[valid_scoring_mask]
+        pd_baseline = pd_baseline[valid_scoring_mask]
+        lgd_baseline = lgd_baseline[valid_scoring_mask]
+        pd_sensitivity = pd_sensitivity[valid_scoring_mask]
+        lgd_sensitivity = lgd_sensitivity[valid_scoring_mask]
+        total_balance = float(np.sum(portfolio_upb))
+        baseline_el = float(np.sum(pd_baseline * lgd_baseline * portfolio_upb))
+        print(
+            f"  Clean scoring set: {len(portfolio_upb):,} loans, "
+            f"${total_balance/1e9:.1f}B balance"
+        )
+
     del df
     gc.collect()
     timings["loan_specific_sensitivity_seconds"] = time.time() - step_start
+
+    # ------------------------------------------------------------------
+    # Step 2b: Persist compact scored portfolio for streamed Monte Carlo
+    # ------------------------------------------------------------------
+    step_start = time.time()
+    print(f"\n{'='*70}")
+    print("Step 2b: Writing compact scored portfolio")
+    print(f"{'='*70}")
+
+    scored_portfolio_path = MODEL_DIR / f"{output_prefix}_scored_portfolio.parquet"
+    write_scored_portfolio_parquet(
+        output_path=scored_portfolio_path,
+        portfolio_upb=portfolio_upb,
+        pd_baseline=pd_baseline,
+        lgd_baseline=lgd_baseline,
+        pd_sensitivity=pd_sensitivity,
+        lgd_sensitivity=lgd_sensitivity,
+        row_group_size=args.loan_chunk_size,
+    )
+    print(f"  Scored portfolio parquet: {scored_portfolio_path}")
+
+    del portfolio_upb, pd_baseline, lgd_baseline, pd_sensitivity, lgd_sensitivity
+    gc.collect()
+    timings["scored_portfolio_write_seconds"] = time.time() - step_start
 
     # ------------------------------------------------------------------
     # Step 3: Compute historical macro statistics
@@ -360,18 +727,24 @@ def main():
     print(f"{'='*70}")
 
     losses, scenarios = run_monte_carlo(
-        portfolio_upb=portfolio_upb,
-        pd_baseline=pd_baseline,
-        lgd_baseline=lgd_baseline,
+        portfolio_upb=None,
+        pd_baseline=None,
+        lgd_baseline=None,
         macro_stats=macro_stats,
-        pd_sensitivity=pd_sensitivity,
-        lgd_sensitivity=lgd_sensitivity,
         n_simulations=args.n_simulations,
         random_seed=args.random_seed,
         backend=args.backend,
         dtype=args.dtype,
         scenario_batch_size=args.scenario_batch_size,
         loan_chunk_size=args.loan_chunk_size,
+        portfolio_path=scored_portfolio_path,
+        portfolio_chunks=iter_scored_portfolio_chunks(
+            scored_portfolio_path,
+            batch_size=args.loan_chunk_size,
+        ),
+        cpu_workers=cpu_parallelism["cpu_workers"],
+        torch_threads_per_worker=cpu_parallelism["torch_threads_per_worker"],
+        pyarrow_threads=cpu_parallelism["pyarrow_threads"],
     )
     timings["monte_carlo_seconds"] = time.time() - step_start
 
@@ -391,11 +764,15 @@ def main():
     )
     metrics["total_balance"] = total_balance
     metrics["backend"] = args.backend
+    metrics["execution_mode"] = execution_mode
     metrics["n_simulations"] = args.n_simulations
     metrics["random_seed"] = args.random_seed
     metrics["dtype"] = args.dtype
     metrics["scenario_batch_size"] = args.scenario_batch_size
     metrics["loan_chunk_size"] = args.loan_chunk_size
+    metrics["cpu_workers"] = cpu_parallelism["cpu_workers"]
+    metrics["torch_threads_per_worker"] = cpu_parallelism["torch_threads_per_worker"]
+    metrics["pyarrow_threads"] = cpu_parallelism["pyarrow_threads"]
     timings["risk_metrics_seconds"] = time.time() - step_start
 
     # ------------------------------------------------------------------
@@ -407,16 +784,17 @@ def main():
     print(f"{'='*70}")
 
     sensitivity_df = sensitivity_analysis_custom(
-        portfolio_upb=portfolio_upb,
-        pd_baseline=pd_baseline,
-        lgd_baseline=lgd_baseline,
+        scored_portfolio_path=scored_portfolio_path,
+        total_balance=total_balance,
+        baseline_loss=baseline_el,
         macro_stats=macro_stats,
-        pd_sensitivity=pd_sensitivity,
-        lgd_sensitivity=lgd_sensitivity,
         backend=args.backend,
         dtype=args.dtype,
         scenario_batch_size=args.scenario_batch_size,
         loan_chunk_size=args.loan_chunk_size,
+        cpu_workers=cpu_parallelism["cpu_workers"],
+        torch_threads_per_worker=cpu_parallelism["torch_threads_per_worker"],
+        pyarrow_threads=cpu_parallelism["pyarrow_threads"],
     )
     timings["sensitivity_seconds"] = time.time() - step_start
 
@@ -453,6 +831,10 @@ def main():
         "n_simulations": args.n_simulations,
         "random_seed": args.random_seed,
         "dtype": args.dtype,
+        "execution_mode": execution_mode,
+        "cpu_workers": cpu_parallelism["cpu_workers"],
+        "torch_threads_per_worker": cpu_parallelism["torch_threads_per_worker"],
+        "pyarrow_threads": cpu_parallelism["pyarrow_threads"],
         **timings,
         "total_runtime_seconds": time.time() - t_total_start,
     }])
@@ -475,7 +857,8 @@ def main():
     print("MONTE CARLO CUSTOM BACKEND RESULTS")
     print(f"{'='*70}")
     print(f"  Backend:               {args.backend}")
-    print(f"  Portfolio:             {len(portfolio_upb):,} loans, ${total_balance/1e9:.1f}B")
+    print(f"  Execution mode:        {execution_mode}")
+    print(f"  Portfolio:             {n_loans:,} loans, ${total_balance/1e9:.1f}B")
     print(f"  Simulations:           {args.n_simulations:,}")
     print(f"  Expected Loss (mean):  ${metrics['expected_loss']/1e6:>10,.0f}M "
           f"({metrics['expected_loss']/total_balance*100:.2f}%)")
