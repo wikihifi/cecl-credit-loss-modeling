@@ -272,6 +272,30 @@ def build_scored_portfolio_work_items(
     return work_items
 
 
+def summarize_portfolio_path(parquet_path):
+    """Return lightweight metadata for a parquet file or parquet dataset."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError(
+            "summarize_portfolio_path requires pyarrow for parquet metadata."
+        ) from exc
+
+    parquet_files = _list_parquet_files(parquet_path)
+    total_rows = 0
+    total_row_groups = 0
+    for parquet_file in parquet_files:
+        parquet_reader = pq.ParquetFile(parquet_file)
+        total_rows += parquet_reader.metadata.num_rows
+        total_row_groups += parquet_reader.num_row_groups
+
+    return {
+        "file_count": len(parquet_files),
+        "row_count": total_rows,
+        "row_group_count": total_row_groups,
+    }
+
+
 def iter_scored_portfolio_chunks(
     parquet_path,
     batch_size: int = 100_000,
@@ -1200,6 +1224,30 @@ def run_monte_carlo(
         cpu_workers=cpu_workers,
         portfolio_path=portfolio_path,
     )
+    print(f"  Execution mode inside kernel: {execution_mode}")
+    print(
+        f"  Scenario tensor shape: {tuple(scenarios_t.shape)}, "
+        f"multiplier tensor shape: {tuple(multipliers_t.shape)}"
+    )
+    if portfolio_path is not None:
+        portfolio_summary = summarize_portfolio_path(portfolio_path)
+        print(
+            "  Portfolio source summary: "
+            f"{portfolio_summary['file_count']:,} file(s), "
+            f"{portfolio_summary['row_group_count']:,} row group(s), "
+            f"{portfolio_summary['row_count']:,} row(s)"
+        )
+    print(
+        f"  Aggregation settings: scenario_batch_size={scenario_batch_size:,}, "
+        f"loan_chunk_size={loan_chunk_size:,}"
+    )
+    if execution_mode == "parallel_cpu":
+        work_item_count = len(build_scored_portfolio_work_items(portfolio_path))
+        print(
+            f"  Parallel CPU workers={cpu_workers}, "
+            f"torch_threads_per_worker={torch_threads_per_worker}, "
+            f"pyarrow_threads={pyarrow_threads}, work_items={work_item_count:,}"
+        )
 
     if execution_mode == "parallel_cpu":
         losses_t, total_balance_t = _aggregate_portfolio_losses_parallel_cpu(
@@ -1252,7 +1300,42 @@ def run_monte_carlo(
     loss_rate_t = losses_t / total_balance_t
 
     elapsed = time.time() - t0
+    loss_stats = _tensor_to_numpy(losses_t)
+    finite_mask = np.isfinite(loss_stats)
+    finite_count = int(finite_mask.sum())
+    nan_count = int(np.isnan(loss_stats).sum())
+    inf_count = int(np.isinf(loss_stats).sum())
+    total_balance = float(total_balance_t.detach().to("cpu"))
+
     print(f"  Completed in {elapsed:.1f} seconds")
+    print(
+        f"  Monte Carlo output quality: total_balance=${total_balance/1e9:.3f}B, "
+        f"finite_losses={finite_count:,}/{len(loss_stats):,}, "
+        f"nan_losses={nan_count:,}, inf_losses={inf_count:,}"
+    )
+    if finite_count > 0:
+        finite_losses = loss_stats[finite_mask]
+        print(
+            f"  Finite loss range: min=${finite_losses.min()/1e6:,.2f}M, "
+            f"max=${finite_losses.max()/1e6:,.2f}M, "
+            f"mean=${finite_losses.mean()/1e6:,.2f}M"
+        )
+
+    if not np.isfinite(total_balance) or total_balance <= 0:
+        raise ValueError(
+            "Monte Carlo produced an invalid total balance. "
+            f"Got total_balance={total_balance}."
+        )
+    if finite_count != len(loss_stats):
+        raise ValueError(
+            "Monte Carlo produced non-finite losses. "
+            f"finite={finite_count}, nan={nan_count}, inf={inf_count}."
+        )
+    if len(loss_stats) != n_simulations:
+        raise ValueError(
+            "Monte Carlo returned an unexpected number of simulated losses. "
+            f"expected={n_simulations}, got={len(loss_stats)}."
+        )
 
     if return_tensors:
         return losses_t, scenarios_t, multipliers_t

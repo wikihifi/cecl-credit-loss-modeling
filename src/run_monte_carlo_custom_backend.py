@@ -40,6 +40,7 @@ sys.path.insert(0, str(project_root / "src"))
 from pd_model import apply_woe_transformation
 from loan_specific_multipliers import build_loan_specific_sensitivities
 from monte_carlo_custom_backend import (
+    build_scored_portfolio_work_items,
     configure_pyarrow_threads,
     configure_torch_cpu_threads,
     compute_historical_macro_stats,
@@ -49,6 +50,7 @@ from monte_carlo_custom_backend import (
     iter_scored_portfolio_chunks,
     resolve_cpu_parallelism,
     run_monte_carlo,
+    summarize_portfolio_path,
 )
 
 
@@ -726,6 +728,20 @@ def main():
     print(f"Step 4: Running {args.n_simulations:,} Monte Carlo simulations")
     print(f"{'='*70}")
 
+    scored_portfolio_summary = summarize_portfolio_path(scored_portfolio_path)
+    print(f"  Scored portfolio path: {scored_portfolio_path}")
+    print(
+        f"  Scored portfolio summary: {scored_portfolio_summary['file_count']:,} file(s), "
+        f"{scored_portfolio_summary['row_group_count']:,} row group(s), "
+        f"{scored_portfolio_summary['row_count']:,} row(s)"
+    )
+    if args.backend == "cpu" and cpu_parallelism["cpu_workers"] > 1:
+        work_item_count = len(build_scored_portfolio_work_items(scored_portfolio_path))
+        print(
+            f"  Parallel work plan: {work_item_count:,} work item(s) across "
+            f"{cpu_parallelism['cpu_workers']} worker(s)"
+        )
+
     losses, scenarios = run_monte_carlo(
         portfolio_upb=None,
         pd_baseline=None,
@@ -747,6 +763,11 @@ def main():
         pyarrow_threads=cpu_parallelism["pyarrow_threads"],
     )
     timings["monte_carlo_seconds"] = time.time() - step_start
+    finite_losses = int(np.isfinite(losses).sum())
+    print(
+        f"  Step 4 finished with {finite_losses:,}/{len(losses):,} finite losses "
+        f"in {timings['monte_carlo_seconds']:.1f}s"
+    )
 
     # ------------------------------------------------------------------
     # Step 5: Compute risk metrics
