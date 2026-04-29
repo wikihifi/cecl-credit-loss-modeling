@@ -21,6 +21,7 @@ from run_state import (
     _sidecar_path,
     discover_runs,
     is_alive,
+    is_run_complete,
     read_state,
     update_state,
     write_state,
@@ -197,6 +198,71 @@ def test_discover_runs_dead_process_marks_failed(tmp_model_dir):
         launch_ts="2026-04-28T14:00:00", log_path="", config={},
     )
     (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("x\n1\n")
+
+    runs = discover_runs()
+    run = next(r for r in runs if r.prefix == prefix)
+    assert run.status == "failed"
+    assert run.exit_code == -1
+
+
+# ---------------------------------------------------------------------------
+# is_run_complete
+# ---------------------------------------------------------------------------
+
+def test_is_run_complete_both_files_present(tmp_model_dir):
+    prefix = "mc_cpu_20260429_100000"
+    (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("backend\ncpu\n")
+    (tmp_model_dir / f"{prefix}_risk_metrics.csv").write_text("expected_loss\n1000\n")
+    assert is_run_complete(prefix) is True
+
+
+def test_is_run_complete_missing_risk_metrics(tmp_model_dir):
+    prefix = "mc_cpu_20260429_100001"
+    (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("backend\ncpu\n")
+    assert is_run_complete(prefix) is False
+
+
+def test_is_run_complete_missing_runtime_summary(tmp_model_dir):
+    prefix = "mc_cpu_20260429_100002"
+    (tmp_model_dir / f"{prefix}_risk_metrics.csv").write_text("expected_loss\n1000\n")
+    assert is_run_complete(prefix) is False
+
+
+def test_is_run_complete_empty_file(tmp_model_dir):
+    prefix = "mc_cpu_20260429_100003"
+    (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("")
+    (tmp_model_dir / f"{prefix}_risk_metrics.csv").write_text("expected_loss\n1000\n")
+    assert is_run_complete(prefix) is False
+
+
+def test_discover_runs_dead_process_with_artifacts_marks_completed(tmp_model_dir):
+    """Dead PID + complete artifacts → completed, not failed."""
+    prefix = "mc_cpu_20260429_110000"
+    write_state(
+        prefix=prefix, pid=99999999, pid_create_time=0.0,
+        launch_ts="2026-04-29T11:00:00", log_path="", config={},
+    )
+    (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("backend\ncpu\n")
+    (tmp_model_dir / f"{prefix}_risk_metrics.csv").write_text("expected_loss\n1000\n")
+
+    runs = discover_runs()
+    run = next(r for r in runs if r.prefix == prefix)
+    assert run.status == "completed"
+    assert run.exit_code == 0
+    # Verify sidecar was written to disk
+    persisted = read_state(prefix)
+    assert persisted.status == "completed"
+
+
+def test_discover_runs_dead_process_no_artifacts_marks_failed(tmp_model_dir):
+    """Dead PID + no artifacts → failed (existing behavior preserved)."""
+    prefix = "mc_cpu_20260429_120000"
+    write_state(
+        prefix=prefix, pid=99999999, pid_create_time=0.0,
+        launch_ts="2026-04-29T12:00:00", log_path="", config={},
+    )
+    (tmp_model_dir / f"{prefix}_runtime_summary.csv").write_text("x\n1\n")
+    # risk_metrics intentionally absent
 
     runs = discover_runs()
     run = next(r for r in runs if r.prefix == prefix)

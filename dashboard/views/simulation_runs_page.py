@@ -19,7 +19,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import COLORS, info_box, section_header, style_chart, warning_box
-from run_state import MODEL_DIR, RunInfo, discover_runs, is_alive, read_state, update_state, write_state
+from run_state import MODEL_DIR, RunInfo, discover_runs, is_alive, is_run_complete, read_state, update_state, write_state
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 RUNNER_SCRIPT = REPO_ROOT / "src" / "run_monte_carlo_custom_backend.py"
@@ -68,6 +68,13 @@ def load_run_sensitivity(path: str) -> pd.DataFrame | None:
 def load_run_scenarios(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
+
+
+def _get_loss_series(df: pd.DataFrame) -> pd.Series | None:
+    for column in ("loss", "portfolio_loss"):
+        if column in df.columns:
+            return df[column]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -324,21 +331,29 @@ def _render_run_charts(run: RunInfo) -> None:
             tornado = []
             for var in sens_df["variable"].unique():
                 vd = sens_df[sens_df["variable"] == var]
-                tornado.append({"variable": var,
-                                 "min": vd["loss"].min() / 1e6,
-                                 "max": vd["loss"].max() / 1e6,
-                                 "range": (vd["loss"].max() - vd["loss"].min()) / 1e6})
-            tdf = pd.DataFrame(tornado).sort_values("range", ascending=True)
-            fig = go.Figure()
-            fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["min"], orientation="h",
-                                  name="Best", marker_color=COLORS["success"], opacity=0.7))
-            fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["max"] - tdf["min"], orientation="h",
-                                  name="Worst Increment", marker_color=COLORS["danger"],
-                                  opacity=0.7, base=tdf["min"]))
-            fig.update_layout(title="Sensitivity: Loss Range by Macro Variable",
-                               xaxis_title="Loss ($M)", barmode="overlay")
-            style_chart(fig, 400)
-            st.plotly_chart(fig, use_container_width=True)
+                loss_series = _get_loss_series(vd)
+                if loss_series is None:
+                    continue
+                tornado.append({
+                    "variable": var,
+                    "min": loss_series.min() / 1e6,
+                    "max": loss_series.max() / 1e6,
+                    "range": (loss_series.max() - loss_series.min()) / 1e6,
+                })
+            if tornado:
+                tdf = pd.DataFrame(tornado).sort_values("range", ascending=True)
+                fig = go.Figure()
+                fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["min"], orientation="h",
+                                      name="Best", marker_color=COLORS["success"], opacity=0.7))
+                fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["max"] - tdf["min"], orientation="h",
+                                      name="Worst Increment", marker_color=COLORS["danger"],
+                                      opacity=0.7, base=tdf["min"]))
+                fig.update_layout(title="Sensitivity: Loss Range by Macro Variable",
+                                   xaxis_title="Loss ($M)", barmode="overlay")
+                style_chart(fig, 400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Chart not available — sensitivity.csv is missing a loss column.")
         else:
             st.info("Chart not available — sensitivity.csv not yet written.")
 
@@ -477,18 +492,29 @@ def _poll_active_runs(all_runs: list[RunInfo]) -> None:
     for prefix, proc in list(procs.items()):
         rc = proc.poll()
         if rc is not None:
-            status = "completed" if rc == 0 else "failed"
-            update_state(prefix, status, rc)
+            # Non-zero exit: the runner may have returned an error code even
+            # after writing all outputs (e.g. warnings-as-errors). Prefer
+            # artifact evidence over the exit code to avoid false failures.
+            if rc == 0:
+                status, exit_code = "completed", 0
+            elif is_run_complete(prefix):
+                status, exit_code = "completed", rc  # outputs present → completed
+            else:
+                status, exit_code = "failed", rc
+            update_state(prefix, status, exit_code)
             completed_prefixes.append(prefix)
 
     for prefix in completed_prefixes:
         procs.pop(prefix, None)
 
     # Post-refresh recovery: sidecars that say running but have no Popen
+    # (e.g. after a Streamlit server restart mid-run). Use artifact evidence
+    # rather than defaulting to failed — the process may have finished cleanly.
     for run in all_runs:
         if run.status == "running" and run.prefix not in procs:
             if not is_alive(run.pid, run.pid_create_time or 0.0):
-                update_state(run.prefix, "failed", -1)
+                terminal = "completed" if is_run_complete(run.prefix) else "failed"
+                update_state(run.prefix, terminal, 0 if terminal == "completed" else -1)
 
     still_active = [p for p in procs.values() if p.poll() is None]
     if still_active:

@@ -131,6 +131,20 @@ def _atomic_write(path: Path, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Artifact-based completion check
+# ---------------------------------------------------------------------------
+
+def is_run_complete(prefix: str) -> bool:
+    """Return True if the run's expected output files are both present and non-empty."""
+    summary = MODEL_DIR / f"{prefix}_runtime_summary.csv"
+    risk = MODEL_DIR / f"{prefix}_risk_metrics.csv"
+    return (
+        summary.exists() and summary.stat().st_size > 0
+        and risk.exists() and risk.stat().st_size > 0
+    )
+
+
+# ---------------------------------------------------------------------------
 # PID liveness
 # ---------------------------------------------------------------------------
 
@@ -180,11 +194,15 @@ def discover_runs() -> list[RunInfo]:
             run = read_state(prefix)
             if run is None:
                 continue
-            # Reconcile live status: if sidecar says running but process is gone
+            # Reconcile live status: if sidecar says running but process is gone,
+            # prefer artifact evidence over PID state — the process may have
+            # completed and exited before the poller captured its exit code.
             if run.status == "running" and not is_alive(run.pid, run.pid_create_time or 0.0):
-                update_state(prefix, "failed", -1)
-                run.status = "failed"
-                run.exit_code = -1
+                terminal = "completed" if is_run_complete(prefix) else "failed"
+                exit_code = 0 if terminal == "completed" else -1
+                update_state(prefix, terminal, exit_code)
+                run.status = terminal
+                run.exit_code = exit_code
         else:
             run = _build_cli_run(prefix, csv_path, legacy=False)
             if run is None:
