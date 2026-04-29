@@ -5,10 +5,14 @@ Handles state file I/O, PID liveness, and run discovery.
 
 import json
 import os
-import time
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+import pandas as pd
+
+_SAFE_PREFIX_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 try:
     import psutil
@@ -84,23 +88,46 @@ def read_state(prefix: str) -> Optional[RunInfo]:
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+
+    # Validate prefix from sidecar to prevent path traversal via crafted JSON
+    raw_prefix = data.get("prefix", prefix)
+    if not _SAFE_PREFIX_RE.match(raw_prefix):
+        return None
+
+    # Validate log_path is contained within MODEL_DIR to prevent path traversal
+    raw_log_path = data.get("log_path")
+    if raw_log_path is not None:
+        try:
+            resolved = Path(raw_log_path).resolve()
+            if not resolved.is_relative_to(MODEL_DIR.resolve()):
+                raw_log_path = None
+        except (ValueError, OSError):
+            raw_log_path = None
+
     return RunInfo(
-        prefix=data.get("prefix", prefix),
+        prefix=raw_prefix,
         status=data.get("status", "unknown"),
         source="ui",
         pid=data.get("pid"),
         pid_create_time=data.get("pid_create_time"),
         exit_code=data.get("exit_code"),
         launch_ts=data.get("launch_ts"),
-        log_path=data.get("log_path"),
+        log_path=raw_log_path,
         config=data.get("config", {}),
     )
 
 
 def _atomic_write(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(".run.json.tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    os.rename(tmp, path)
+    tmp = path.parent / (path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2))
+        os.rename(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +166,8 @@ def discover_runs() -> list[RunInfo]:
     runs: list[RunInfo] = []
     for csv_path in MODEL_DIR.glob("mc_*_runtime_summary.csv"):
         prefix = csv_path.name.replace("_runtime_summary.csv", "")
+        if len(prefix) > 80 or not _SAFE_PREFIX_RE.match(prefix):
+            continue
         if prefix in _LEGACY_PREFIXES:
             # Show legacy runs but mark them so the UI can badge them
             run = _build_cli_run(prefix, csv_path, legacy=True)
@@ -183,14 +212,13 @@ def _build_cli_run(prefix: str, csv_path: Path, *, legacy: bool) -> Optional[Run
     config = {}
     if risk_path.exists():
         try:
-            import pandas as pd
             row = pd.read_csv(risk_path).iloc[0]
             for col in ("backend", "n_simulations", "dtype", "cpu_workers",
                         "torch_threads_per_worker", "pyarrow_threads",
                         "scenario_batch_size", "loan_chunk_size", "execution_mode"):
                 if col in row.index:
                     val = row[col]
-                    config[col] = None if (hasattr(val, "__class__") and str(val) == "nan") else val
+                    config[col] = None if pd.isna(val) else val
         except Exception:
             pass
 
@@ -200,7 +228,7 @@ def _build_cli_run(prefix: str, csv_path: Path, *, legacy: bool) -> Optional[Run
         if len(parts) >= 2:
             config["backend"] = parts[1]
 
-    status = "completed" if csv_path.exists() else "failed"
+    status = "completed"  # csv_path always exists — it was the glob match
     if legacy:
         config["_legacy"] = True
 

@@ -4,6 +4,8 @@ Lets analysts launch run_monte_carlo_custom_backend.py, watch live logs,
 and browse all completed runs (UI-launched and CLI-launched).
 """
 
+from __future__ import annotations
+
 import re
 import subprocess
 import sys
@@ -17,11 +19,8 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import COLORS, info_box, section_header, style_chart, warning_box
+from run_state import MODEL_DIR, RunInfo, discover_runs, is_alive, read_state, update_state, write_state
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from run_state import RunInfo, discover_runs, is_alive, read_state, update_state, write_state
-
-MODEL_DIR = Path(__file__).parent.parent.parent / "models"
 REPO_ROOT = Path(__file__).parent.parent.parent
 RUNNER_SCRIPT = REPO_ROOT / "src" / "run_monte_carlo_custom_backend.py"
 
@@ -41,31 +40,31 @@ STEP_NAME_MAP = {
 # Cached data loaders (keyed on path so each prefix gets its own cache entry)
 # ---------------------------------------------------------------------------
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_run_summary(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_run_risk(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_run_dist(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_run_sensitivity(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_run_scenarios(path: str) -> pd.DataFrame | None:
     p = Path(path)
     return pd.read_csv(p) if p.exists() else None
@@ -80,8 +79,13 @@ def read_log_tail(log_path: str, n: int = 50) -> str:
     if not p.exists():
         return ""
     try:
-        text = p.read_text(errors="replace")
-        lines = text.splitlines()
+        with open(p, "rb") as f:
+            try:
+                f.seek(-16384, 2)  # read at most 16 KB from end
+            except OSError:
+                f.seek(0)
+            content = f.read().decode("utf-8", errors="replace")
+        lines = content.splitlines()
         return "\n".join(lines[-n:])
     except OSError:
         return ""
@@ -170,6 +174,10 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
 
         try:
             log_file = open(log_path, "w")
+        except OSError as exc:
+            st.error(f"Cannot open log file: {exc}")
+            return
+        try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=log_file,
@@ -177,8 +185,11 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
                 cwd=str(REPO_ROOT),
             )
         except Exception as exc:
+            log_file.close()
             st.error(f"Failed to launch runner: {exc}")
             return
+        finally:
+            log_file.close()  # parent closes its copy; child retains its own fd
 
         try:
             import psutil as _psutil
@@ -380,10 +391,21 @@ def _render_config_table(run: RunInfo) -> None:
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
+_MAX_LOG_DISPLAY_BYTES = 512 * 1024  # 512 KB
+
 def _render_raw_log(run: RunInfo) -> None:
     with st.expander("Raw log output"):
         if run.log_path and Path(run.log_path).exists():
-            st.code(Path(run.log_path).read_text(errors="replace"), language=None)
+            p = Path(run.log_path)
+            size = p.stat().st_size
+            if size > _MAX_LOG_DISPLAY_BYTES:
+                with open(p, "rb") as f:
+                    f.seek(-_MAX_LOG_DISPLAY_BYTES, 2)
+                    content = f.read().decode("utf-8", errors="replace")
+                st.caption(f"Showing last 512 KB of {size / 1e6:.1f} MB log.")
+            else:
+                content = p.read_text(errors="replace")
+            st.code(content, language=None)
         else:
             st.info("No log captured (CLI run or log file missing).")
 
