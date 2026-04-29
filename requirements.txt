@@ -8,3 +8,4 @@ joblib
 pyarrow
 fredapi
 python-dotenv
+psutil>=5.9
