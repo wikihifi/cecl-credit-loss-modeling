@@ -79,6 +79,7 @@ page = st.sidebar.radio(
         "LGD Model",
         "Stress Testing",
         "Monte Carlo",
+        "Simulation Runs",
         "Loan Scorer",
     ],
     key="main_nav",
@@ -114,6 +115,9 @@ elif page == "Stress Testing":
 elif page == "Monte Carlo":
     from views import monte_carlo_page
     monte_carlo_page.render()
+elif page == "Simulation Runs":
+    from views import simulation_runs_page
+    simulation_runs_page.render()
 elif page == "Loan Scorer":
     from views import loan_scorer_page
     loan_scorer_page.render()
