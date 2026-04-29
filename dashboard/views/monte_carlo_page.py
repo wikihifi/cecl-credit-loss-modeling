@@ -9,6 +9,7 @@ import numpy as np
 import plotly.graph_objects as go
 from pathlib import Path
 import sys
+from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import style_chart, COLORS, info_box, warning_box, section_header
 
@@ -33,6 +34,13 @@ def load_mc_sensitivity():
 def load_mc_scenarios():
     p = MODEL_DIR / "mc_scenarios.csv"
     return pd.read_csv(p) if p.exists() else None
+
+
+def _get_loss_series(df: pd.DataFrame) -> Optional[pd.Series]:
+    for column in ("loss", "portfolio_loss"):
+        if column in df.columns:
+            return df[column]
+    return None
 
 
 def render():
@@ -89,16 +97,22 @@ def render():
                 tornado = []
                 for var in sens["variable"].unique():
                     vd = sens[sens["variable"]==var]
-                    tornado.append({"variable":var, "min":vd["loss"].min()/1e6, "max":vd["loss"].max()/1e6,
-                                    "range":(vd["loss"].max()-vd["loss"].min())/1e6})
-                tdf = pd.DataFrame(tornado).sort_values("range", ascending=True)
-                fig = go.Figure()
-                fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["min"], orientation="h", name="Best", marker_color=COLORS["success"], opacity=0.7))
-                fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["max"]-tdf["min"], orientation="h", name="Worst Increment",
-                    marker_color=COLORS["danger"], opacity=0.7, base=tdf["min"]))
-                fig.update_layout(title="Sensitivity: Loss Range by Macro Variable", xaxis_title="Loss ($M)", barmode="overlay")
-                style_chart(fig, 400)
-                st.plotly_chart(fig, use_container_width=True)
+                    loss_series = _get_loss_series(vd)
+                    if loss_series is None:
+                        continue
+                    tornado.append({"variable":var, "min":loss_series.min()/1e6, "max":loss_series.max()/1e6,
+                                    "range":(loss_series.max()-loss_series.min())/1e6})
+                if tornado:
+                    tdf = pd.DataFrame(tornado).sort_values("range", ascending=True)
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["min"], orientation="h", name="Best", marker_color=COLORS["success"], opacity=0.7))
+                    fig.add_trace(go.Bar(y=tdf["variable"], x=tdf["max"]-tdf["min"], orientation="h", name="Worst Increment",
+                        marker_color=COLORS["danger"], opacity=0.7, base=tdf["min"]))
+                    fig.update_layout(title="Sensitivity: Loss Range by Macro Variable", xaxis_title="Loss ($M)", barmode="overlay")
+                    style_chart(fig, 400)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Sensitivity data is missing a loss column.")
             with ce:
                 info_box("<strong>Unemployment</strong> is the dominant driver (2.9x loss increase from 4% to 12%). "
                          "HPI is secondary, operating through the LGD channel.")

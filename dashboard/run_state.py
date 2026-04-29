@@ -174,43 +174,44 @@ def is_alive(pid: int, pid_create_time: float, tolerance: float = 5.0) -> bool:
 
 def discover_runs() -> list[RunInfo]:
     """
-    Glob models/ for all mc_*_runtime_summary.csv files, build RunInfos,
-    sort newest-first.
+    Discover all runs in models/, sorted newest-first.
+
+    Phase 1 — sidecars (*.run.json): covers UI-launched runs immediately on
+    submit, even before result CSVs are written.
+    Phase 2 — CSV artifacts: adds CLI runs and legacy bare-prefix runs that
+    have no sidecar. Prefixes already found in Phase 1 are skipped.
     """
-    runs: list[RunInfo] = []
+    seen: dict[str, RunInfo] = {}
+
+    # Phase 1: sidecar-first so UI runs appear the moment write_state() fires
+    for sidecar in MODEL_DIR.glob("mc_*.run.json"):
+        prefix = sidecar.name[: -len(".run.json")]
+        if len(prefix) > 80 or not _SAFE_PREFIX_RE.match(prefix):
+            continue
+        run = read_state(prefix)
+        if run is None:
+            continue
+        # Reconcile: sidecar says running but process is gone
+        if run.status == "running" and not is_alive(run.pid, run.pid_create_time or 0.0):
+            terminal = "completed" if is_run_complete(prefix) else "failed"
+            exit_code = 0 if terminal == "completed" else -1
+            update_state(prefix, terminal, exit_code)
+            run.status = terminal
+            run.exit_code = exit_code
+        seen[prefix] = run
+
+    # Phase 2: CSV artifacts for CLI runs (and legacy bare prefixes)
     for csv_path in MODEL_DIR.glob("mc_*_runtime_summary.csv"):
         prefix = csv_path.name.replace("_runtime_summary.csv", "")
         if len(prefix) > 80 or not _SAFE_PREFIX_RE.match(prefix):
             continue
-        if prefix in _LEGACY_PREFIXES:
-            # Show legacy runs but mark them so the UI can badge them
-            run = _build_cli_run(prefix, csv_path, legacy=True)
-            if run:
-                runs.append(run)
-            continue
+        if prefix in seen:
+            continue  # already discovered via sidecar
+        legacy = prefix in _LEGACY_PREFIXES
+        run = _build_cli_run(prefix, csv_path, legacy=legacy)
+        if run:
+            seen[prefix] = run
 
-        sidecar = _sidecar_path(prefix)
-        if sidecar.exists():
-            run = read_state(prefix)
-            if run is None:
-                continue
-            # Reconcile live status: if sidecar says running but process is gone,
-            # prefer artifact evidence over PID state — the process may have
-            # completed and exited before the poller captured its exit code.
-            if run.status == "running" and not is_alive(run.pid, run.pid_create_time or 0.0):
-                terminal = "completed" if is_run_complete(prefix) else "failed"
-                exit_code = 0 if terminal == "completed" else -1
-                update_state(prefix, terminal, exit_code)
-                run.status = terminal
-                run.exit_code = exit_code
-        else:
-            run = _build_cli_run(prefix, csv_path, legacy=False)
-            if run is None:
-                continue
-
-        runs.append(run)
-
-    # Sort: UI runs by launch_ts, CLI runs by file mtime, newest first
     def _sort_key(r: RunInfo):
         if r.launch_ts:
             return r.launch_ts
@@ -220,6 +221,7 @@ def discover_runs() -> list[RunInfo]:
         except OSError:
             return ""
 
+    runs = list(seen.values())
     runs.sort(key=_sort_key, reverse=True)
     return runs
 

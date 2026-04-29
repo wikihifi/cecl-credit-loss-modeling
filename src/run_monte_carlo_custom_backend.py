@@ -169,6 +169,70 @@ def parse_args():
             "to score. Overrides the default search order."
         ),
     )
+    parser.add_argument(
+        "--antithetic-variates",
+        action="store_true",
+        help=(
+            "Use antithetic variates for variance reduction. "
+            "Draws n/2 random shocks and pairs each with its negative, "
+            "reducing estimator variance without extra model evaluations."
+        ),
+    )
+    parser.add_argument(
+        "--adaptive-stopping",
+        action="store_true",
+        help=(
+            "Stop early when key risk metrics have converged within --convergence-tolerance "
+            "across two consecutive simulation batches. Requires --simulation-batch-size."
+        ),
+    )
+    parser.add_argument(
+        "--simulation-batch-size",
+        type=int,
+        default=10_000,
+        help=(
+            "Simulations per adaptive-stopping batch. Also used as the minimum "
+            "granularity when --adaptive-stopping is active. Default: 10000."
+        ),
+    )
+    parser.add_argument(
+        "--convergence-tolerance",
+        type=float,
+        default=0.01,
+        help=(
+            "Relative change threshold for adaptive stopping. "
+            "A batch is considered converged when all tracked metrics change by "
+            "less than this fraction between consecutive batches. Default: 0.01 (1%%)."
+        ),
+    )
+    parser.add_argument(
+        "--min-simulations",
+        type=int,
+        default=0,
+        help=(
+            "Minimum simulations to run before adaptive stopping is allowed. "
+            "Defaults to one simulation batch if 0."
+        ),
+    )
+    parser.add_argument(
+        "--max-simulations",
+        type=int,
+        default=0,
+        help=(
+            "Maximum simulations when adaptive stopping is active. "
+            "Defaults to --n-simulations if 0."
+        ),
+    )
+    parser.add_argument(
+        "--convergence-metrics",
+        nargs="+",
+        choices=["expected_loss", "var_99", "var_999", "es_99"],
+        default=["expected_loss", "var_99"],
+        help=(
+            "Risk metrics to monitor for adaptive stopping convergence. "
+            "Default: expected_loss var_99."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -498,6 +562,36 @@ def sensitivity_analysis_custom(
     return pd.DataFrame(results)
 
 
+# ---------------------------------------------------------------------------
+# Adaptive stopping helpers
+# ---------------------------------------------------------------------------
+
+def _quick_risk_metrics(losses: np.ndarray) -> dict:
+    """Compute EL, VaR99, VaR99.9, ES99 from a numpy loss array (no GPU)."""
+    el = float(np.mean(losses))
+    var99 = float(np.quantile(losses, 0.99))
+    var999 = float(np.quantile(losses, 0.999))
+    tail_mask = losses >= var99
+    es99 = float(np.mean(losses[tail_mask])) if tail_mask.any() else var99
+    return {"expected_loss": el, "var_99": var99, "var_999": var999, "es_99": es99}
+
+
+def _is_converged(
+    prev: dict,
+    curr: dict,
+    metric_names: list,
+    tolerance: float,
+) -> bool:
+    """Return True when every tracked metric's relative change is below tolerance."""
+    for name in metric_names:
+        denom = abs(prev[name])
+        if denom < 1.0:
+            denom = 1.0
+        if abs(curr[name] - prev[name]) / denom > tolerance:
+            return False
+    return True
+
+
 def main():
     args = parse_args()
     output_prefix = args.output_prefix or f"mc_{args.backend}"
@@ -534,6 +628,15 @@ def main():
     print(f"Scenario batch size: {args.scenario_batch_size:,}")
     print(f"Loan chunk size: {args.loan_chunk_size:,}")
     print(f"Execution mode: {execution_mode}")
+    print(f"Antithetic variates: {args.antithetic_variates}")
+    if args.adaptive_stopping:
+        max_sims = args.max_simulations or args.n_simulations
+        min_sims = args.min_simulations or args.simulation_batch_size
+        print(
+            f"Adaptive stopping: enabled "
+            f"(batch={args.simulation_batch_size:,}, tol={args.convergence_tolerance}, "
+            f"min={min_sims:,}, max={max_sims:,}, metrics={args.convergence_metrics})"
+        )
     if args.backend == "cpu":
         print(f"CPU workers: {cpu_parallelism['cpu_workers']}")
         print(f"Torch threads/worker: {cpu_parallelism['torch_threads_per_worker']}")
@@ -742,31 +845,99 @@ def main():
             f"{cpu_parallelism['cpu_workers']} worker(s)"
         )
 
-    losses, scenarios = run_monte_carlo(
+    _mc_kwargs = dict(
         portfolio_upb=None,
         pd_baseline=None,
         lgd_baseline=None,
         macro_stats=macro_stats,
-        n_simulations=args.n_simulations,
-        random_seed=args.random_seed,
         backend=args.backend,
         dtype=args.dtype,
         scenario_batch_size=args.scenario_batch_size,
         loan_chunk_size=args.loan_chunk_size,
         portfolio_path=scored_portfolio_path,
-        portfolio_chunks=iter_scored_portfolio_chunks(
-            scored_portfolio_path,
-            batch_size=args.loan_chunk_size,
-        ),
         cpu_workers=cpu_parallelism["cpu_workers"],
         torch_threads_per_worker=cpu_parallelism["torch_threads_per_worker"],
         pyarrow_threads=cpu_parallelism["pyarrow_threads"],
+        antithetic=args.antithetic_variates,
     )
+
+    if not args.adaptive_stopping:
+        losses, scenarios = run_monte_carlo(
+            **_mc_kwargs,
+            n_simulations=args.n_simulations,
+            random_seed=args.random_seed,
+            portfolio_chunks=iter_scored_portfolio_chunks(
+                scored_portfolio_path,
+                batch_size=args.loan_chunk_size,
+            ),
+        )
+        simulations_executed = args.n_simulations
+        early_stopped = False
+        batches_run = 1
+    else:
+        sim_batch = args.simulation_batch_size
+        max_sims = args.max_simulations if args.max_simulations > 0 else args.n_simulations
+        min_sims = args.min_simulations if args.min_simulations > 0 else sim_batch
+        conv_metrics = args.convergence_metrics
+        tol = args.convergence_tolerance
+
+        all_losses_parts: list = []
+        all_scenarios_parts: list = []
+        prev_metrics_snap: dict | None = None
+        simulations_executed = 0
+        early_stopped = False
+        batches_run = 0
+
+        while simulations_executed < max_sims:
+            remaining = max_sims - simulations_executed
+            this_batch = min(sim_batch, remaining)
+            batch_seed = args.random_seed + batches_run * 7919  # prime stride
+            print(
+                f"  [adaptive batch {batches_run + 1}] "
+                f"sims={this_batch:,}, seed={batch_seed}, "
+                f"total_so_far={simulations_executed:,}"
+            )
+            b_losses, b_scenarios = run_monte_carlo(
+                **_mc_kwargs,
+                n_simulations=this_batch,
+                random_seed=batch_seed,
+                portfolio_chunks=iter_scored_portfolio_chunks(
+                    scored_portfolio_path,
+                    batch_size=args.loan_chunk_size,
+                ),
+            )
+            all_losses_parts.append(b_losses)
+            all_scenarios_parts.append(b_scenarios)
+            simulations_executed += this_batch
+            batches_run += 1
+
+            if simulations_executed >= min_sims:
+                curr_snap = _quick_risk_metrics(np.concatenate(all_losses_parts))
+                if prev_metrics_snap is not None and _is_converged(
+                    prev_metrics_snap, curr_snap, conv_metrics, tol
+                ):
+                    print(
+                        f"  [adaptive] converged after {simulations_executed:,} simulations "
+                        f"({batches_run} batches). Metrics: "
+                        + ", ".join(
+                            f"{m}={curr_snap[m]/1e6:.2f}M" for m in conv_metrics
+                        )
+                    )
+                    early_stopped = True
+                    break
+                prev_metrics_snap = curr_snap
+
+        losses = np.concatenate(all_losses_parts)
+        scenarios = pd.concat(all_scenarios_parts, ignore_index=True)
+        scenarios["portfolio_loss"] = losses
+        scenarios["loss_rate"] = losses / total_balance
+
     timings["monte_carlo_seconds"] = time.time() - step_start
     finite_losses = int(np.isfinite(losses).sum())
     print(
         f"  Step 4 finished with {finite_losses:,}/{len(losses):,} finite losses "
         f"in {timings['monte_carlo_seconds']:.1f}s"
+        + (f" [early_stopped after {simulations_executed:,} sims]" if early_stopped else "")
     )
 
     # ------------------------------------------------------------------
@@ -787,6 +958,7 @@ def main():
     metrics["backend"] = args.backend
     metrics["execution_mode"] = execution_mode
     metrics["n_simulations"] = args.n_simulations
+    metrics["simulations_executed"] = simulations_executed
     metrics["random_seed"] = args.random_seed
     metrics["dtype"] = args.dtype
     metrics["scenario_batch_size"] = args.scenario_batch_size
@@ -794,6 +966,15 @@ def main():
     metrics["cpu_workers"] = cpu_parallelism["cpu_workers"]
     metrics["torch_threads_per_worker"] = cpu_parallelism["torch_threads_per_worker"]
     metrics["pyarrow_threads"] = cpu_parallelism["pyarrow_threads"]
+    metrics["antithetic_variates"] = args.antithetic_variates
+    metrics["adaptive_stopping"] = args.adaptive_stopping
+    metrics["early_stopped"] = early_stopped
+    metrics["batches_run"] = batches_run
+    metrics["simulation_batch_size"] = args.simulation_batch_size if args.adaptive_stopping else None
+    metrics["convergence_tolerance"] = args.convergence_tolerance if args.adaptive_stopping else None
+    metrics["convergence_metrics"] = (
+        ",".join(args.convergence_metrics) if args.adaptive_stopping else None
+    )
     timings["risk_metrics_seconds"] = time.time() - step_start
 
     # ------------------------------------------------------------------
@@ -850,12 +1031,17 @@ def main():
     runtime_df = pd.DataFrame([{
         "backend": args.backend,
         "n_simulations": args.n_simulations,
+        "simulations_executed": simulations_executed,
         "random_seed": args.random_seed,
         "dtype": args.dtype,
         "execution_mode": execution_mode,
         "cpu_workers": cpu_parallelism["cpu_workers"],
         "torch_threads_per_worker": cpu_parallelism["torch_threads_per_worker"],
         "pyarrow_threads": cpu_parallelism["pyarrow_threads"],
+        "antithetic_variates": args.antithetic_variates,
+        "adaptive_stopping": args.adaptive_stopping,
+        "early_stopped": early_stopped,
+        "batches_run": batches_run,
         **timings,
         "total_runtime_seconds": time.time() - t_total_start,
     }])

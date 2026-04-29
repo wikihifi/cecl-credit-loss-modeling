@@ -264,6 +264,480 @@ _LABEL_COLORS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Forecast quality vs simulation count
+# ---------------------------------------------------------------------------
+
+def _compute_convergence_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """Add reference-error and efficiency columns to a completed-runs DataFrame.
+
+    Reference = row with the highest n_simulations within each (backend, dtype) group.
+    Groups with only one row get zero error (the row IS the reference).
+
+    Added columns:
+      el_pct_error, var99_pct_error, var999_pct_error, es99_pct_error,
+      runtime_per_sim, error_per_second
+    """
+    df = df.copy()
+    _NEW = [
+        "el_pct_error", "var99_pct_error", "var999_pct_error", "es99_pct_error",
+        "runtime_per_sim", "error_per_second",
+    ]
+    for c in _NEW:
+        df[c] = float("nan")
+
+    df["n_simulations"] = pd.to_numeric(df["n_simulations"], errors="coerce")
+
+    rt = pd.to_numeric(df.get("total_runtime_seconds"), errors="coerce")
+    ns = df["n_simulations"]
+    valid_rt = rt.notna() & ns.notna() & (ns > 0)
+    df.loc[valid_rt, "runtime_per_sim"] = rt[valid_rt] / ns[valid_rt]
+
+    if df.empty:
+        return df
+
+    df["_be"] = df["backend"].fillna("unknown").astype(str)
+    df["_dt"] = df["dtype"].fillna("unknown").astype(str)
+
+    metric_map = {
+        "expected_loss": "el_pct_error",
+        "var_99": "var99_pct_error",
+        "var_999": "var999_pct_error",
+        "es_99": "es99_pct_error",
+    }
+
+    for (_be, _dt), grp in df.groupby(["_be", "_dt"]):
+        ns_grp = pd.to_numeric(grp["n_simulations"], errors="coerce")
+        if ns_grp.isna().all():
+            continue
+        ref_idx = ns_grp.idxmax()
+        ref = grp.loc[ref_idx]
+        for idx in grp.index:
+            row = grp.loc[idx]
+            for metric, err_col in metric_map.items():
+                try:
+                    rv = float(ref[metric])
+                    cv = float(row[metric])
+                    if not (pd.isna(rv) or pd.isna(cv)) and rv != 0:
+                        df.at[idx, err_col] = abs(cv - rv) / abs(rv) * 100.0
+                except (TypeError, ValueError):
+                    pass
+
+    ep = df["el_pct_error"]
+    rt2 = pd.to_numeric(df.get("total_runtime_seconds"), errors="coerce")
+    valid_eff = ep.notna() & rt2.notna() & (rt2 > 0)
+    df.loc[valid_eff, "error_per_second"] = ep[valid_eff] / rt2[valid_eff]
+
+    df = df.drop(columns=["_be", "_dt"])
+    return df
+
+
+def _render_sim_count_recommendation(df: pd.DataFrame) -> None:
+    """Narrative interpretation box: sweet spot, tail convergence, diminishing returns."""
+    el_err = df["el_pct_error"].dropna()
+    v99_err = df["var99_pct_error"].dropna()
+    has_errors = not el_err.empty and not v99_err.empty
+
+    st.markdown("#### Interpretation")
+    cols = st.columns(3)
+
+    # Sweet spot
+    sweet_n = None
+    if has_errors:
+        cand = df.dropna(subset=["el_pct_error", "var99_pct_error", "n_simulations"])
+        cand = cand.sort_values("n_simulations")
+        good = cand[(cand["el_pct_error"] <= 1.0) & (cand["var99_pct_error"] <= 2.0)]
+        if not good.empty:
+            sweet_n = int(good["n_simulations"].min())
+
+    if sweet_n is not None:
+        cols[0].success(
+            f"**Sweet spot: {sweet_n:,} sims**\n\n"
+            "EL error ≤ 1% and VaR 99 error ≤ 2% vs the highest-sim reference run."
+        )
+    elif has_errors:
+        cols[0].warning(
+            f"**No sweet spot found**\n\n"
+            f"Best EL error: {el_err.min():.1f}%. "
+            "Add runs with more simulations to find the convergence threshold."
+        )
+    else:
+        cols[0].info(
+            "**Sweet spot: insufficient data**\n\n"
+            "Need ≥ 2 completed runs with different n_simulations in the same backend/dtype group."
+        )
+
+    # Tail convergence
+    if has_errors and "var999_pct_error" in df.columns and df["var999_pct_error"].notna().any():
+        avg_el = el_err.mean()
+        avg_v999 = df["var999_pct_error"].dropna().mean()
+        if avg_v999 > avg_el * 1.5:
+            cols[1].warning(
+                f"**Tail converges slower**\n\n"
+                f"VaR 99.9% avg error ({avg_v999:.1f}%) exceeds EL avg error ({avg_el:.1f}%). "
+                "Tail metrics need more simulations to stabilize."
+            )
+        else:
+            cols[1].success(
+                f"**Tail tracks EL closely**\n\n"
+                f"VaR 99.9% error ({avg_v999:.1f}%) ≈ EL error ({avg_el:.1f}%)."
+            )
+    else:
+        cols[1].info(
+            "**Tail convergence:** insufficient data\n\n"
+            "Need multiple sim counts to compare tail vs EL convergence speed."
+        )
+
+    # Diminishing returns
+    cand_dr = df.dropna(subset=["n_simulations", "el_pct_error"]).sort_values("n_simulations")
+    if len(cand_dr) >= 3:
+        ns_arr = cand_dr["n_simulations"].values
+        err_arr = cand_dr["el_pct_error"].values
+        dr_n = None
+        for i in range(1, len(ns_arr)):
+            if ns_arr[i] > ns_arr[i - 1] > 0:
+                reduction = err_arr[i - 1] - err_arr[i]
+                ratio = ns_arr[i] / ns_arr[i - 1]
+                if reduction / max(err_arr[i - 1], 0.001) < 0.10 and ratio > 1.5:
+                    dr_n = int(ns_arr[i])
+                    break
+        if dr_n:
+            cols[2].info(
+                f"**Diminishing returns ~{dr_n:,} sims**\n\n"
+                "Error reduction < 10% despite ≥ 50% more simulations."
+            )
+        else:
+            cols[2].info("**Diminishing returns:** not yet visible from available data.")
+    else:
+        cols[2].info(
+            "**Diminishing returns:** need ≥ 3 distinct sim counts to identify the inflection point."
+        )
+
+
+def _chart_convergence(df: pd.DataFrame) -> None:
+    """Chart 1: Risk metrics vs n_simulations."""
+    metrics = [
+        ("expected_loss", "Expected Loss", COLORS.get("primary", "#3b82f6")),
+        ("var_99", "VaR 99%", COLORS.get("warning", "#f59e0b")),
+        ("var_999", "VaR 99.9%", COLORS.get("danger", "#ef4444")),
+        ("es_99", "ES 99%", COLORS.get("success", "#22c55e")),
+    ]
+    plot_df = df.dropna(subset=["n_simulations"]).copy()
+    plot_df["n_simulations"] = pd.to_numeric(plot_df["n_simulations"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["n_simulations"])
+
+    if plot_df.empty:
+        st.info("Not enough data for convergence chart.")
+        return
+
+    has_any = any(col in plot_df.columns and plot_df[col].notna().any() for col, *_ in metrics)
+    if not has_any:
+        st.info("Risk metric columns not available.")
+        return
+
+    fig = go.Figure()
+    for col, label, color in metrics:
+        sub = plot_df.dropna(subset=[col]).sort_values("n_simulations")
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=sub["n_simulations"],
+            y=sub[col] / 1e6,
+            mode="lines+markers",
+            name=label,
+            line=dict(color=color),
+            marker=dict(size=8),
+            hovertemplate=f"{label}: $%{{y:,.0f}}M at %{{x:,}} sims<extra></extra>",
+        ))
+
+    ns_vals = plot_df["n_simulations"].dropna()
+    xtype = "log" if (ns_vals.max() / max(ns_vals.min(), 1)) >= 10 else "linear"
+    fig.update_layout(
+        title="Risk Metric Convergence",
+        xaxis_title="N Simulations" + (" (log)" if xtype == "log" else ""),
+        yaxis_title="Metric ($M)",
+        xaxis_type=xtype,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    style_chart(fig, 380)
+    st.plotly_chart(fig, use_container_width=True, key="sq-convergence")
+
+    if len(ns_vals.unique()) == 1:
+        st.caption(
+            "All runs use the same simulation count — launch runs with different n_simulations "
+            "to observe convergence."
+        )
+
+
+def _chart_error_to_reference(df: pd.DataFrame) -> None:
+    """Chart 2: Percent error vs n_simulations (selectable metric)."""
+    err_opts = {
+        "el_pct_error": "EL % Error",
+        "var99_pct_error": "VaR 99% Error",
+        "var999_pct_error": "VaR 99.9% Error",
+        "es99_pct_error": "ES 99% Error",
+    }
+    available = {k: v for k, v in err_opts.items()
+                 if k in df.columns and df[k].notna().any()}
+
+    if not available:
+        st.info(
+            "Error-to-reference chart requires ≥ 2 completed runs in the same backend/dtype "
+            "group at different simulation counts."
+        )
+        return
+
+    sel = st.selectbox(
+        "Error metric",
+        options=list(available.keys()),
+        format_func=lambda k: available[k],
+        key="sq-err-metric-sel",
+    )
+
+    plot_df = df.dropna(subset=["n_simulations", sel]).copy()
+    plot_df["n_simulations"] = pd.to_numeric(plot_df["n_simulations"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["n_simulations"]).sort_values("n_simulations")
+
+    if plot_df.empty:
+        st.info("No data for the selected error metric.")
+        return
+
+    palette = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6"]
+    fig = go.Figure()
+    for i, be in enumerate(plot_df["backend"].fillna("unknown").unique()):
+        sub = plot_df[plot_df["backend"].fillna("unknown") == be]
+        fig.add_trace(go.Scatter(
+            x=sub["n_simulations"],
+            y=sub[sel],
+            mode="lines+markers",
+            name=str(be),
+            line=dict(color=palette[i % len(palette)]),
+            marker=dict(size=9),
+            text=sub["prefix"].str[-10:],
+            hovertemplate=f"{be} — %{{text}}<br>Sims: %{{x:,}}<br>Error: %{{y:.2f}}%<extra></extra>",
+        ))
+
+    fig.add_hline(y=1.0, line_dash="dot", line_color="#22c55e",
+                  annotation_text="1% threshold", annotation_position="right")
+    fig.add_hline(y=2.0, line_dash="dot", line_color="#f59e0b",
+                  annotation_text="2% threshold", annotation_position="right")
+
+    ns_vals = plot_df["n_simulations"].dropna()
+    xtype = "log" if (ns_vals.max() / max(ns_vals.min(), 1)) >= 10 else "linear"
+    fig.update_layout(
+        title=f"{available[sel]} vs N Simulations",
+        xaxis_title="N Simulations" + (" (log)" if xtype == "log" else ""),
+        yaxis_title="% Error vs Reference",
+        xaxis_type=xtype,
+    )
+    style_chart(fig, 380)
+    st.plotly_chart(fig, use_container_width=True, key="sq-error-to-ref")
+    st.caption(
+        "Reference = highest-n_simulations run in the same backend/dtype group. "
+        "Zero error = this run IS the reference."
+    )
+
+
+def _chart_runtime_vs_quality(df: pd.DataFrame) -> None:
+    """Chart 3: Total runtime vs EL error (efficiency frontier view)."""
+    plot_df = df.dropna(subset=["total_runtime_seconds", "el_pct_error"]).copy()
+    plot_df["total_runtime_seconds"] = pd.to_numeric(
+        plot_df["total_runtime_seconds"], errors="coerce"
+    )
+    plot_df = plot_df.dropna(subset=["total_runtime_seconds"])
+
+    if plot_df.empty:
+        st.info(
+            "Runtime vs quality chart requires runs with both timing data and error vs reference. "
+            "Need ≥ 2 runs in the same backend/dtype group."
+        )
+        return
+
+    ns_series = pd.to_numeric(plot_df["n_simulations"], errors="coerce").fillna(1000)
+    ns_max = ns_series.max()
+    marker_sizes = ((ns_series / max(ns_max, 1)) * 20 + 6).clip(6, 26)
+
+    palette = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6"]
+    fig = go.Figure()
+    for i, be in enumerate(plot_df["backend"].fillna("unknown").unique()):
+        mask = plot_df["backend"].fillna("unknown") == be
+        sub = plot_df[mask]
+        fig.add_trace(go.Scatter(
+            x=sub["total_runtime_seconds"],
+            y=sub["el_pct_error"],
+            mode="markers",
+            name=str(be),
+            marker=dict(
+                size=marker_sizes[mask].tolist(),
+                color=palette[i % len(palette)],
+                opacity=0.8,
+            ),
+            text=sub.apply(
+                lambda r: (
+                    f"{str(r.get('prefix', ''))[-10:]} ({int(r['n_simulations']):,} sims)"
+                    if pd.notna(r.get("n_simulations")) else str(r.get("prefix", ""))[-10:]
+                ),
+                axis=1,
+            ),
+            hovertemplate="%{text}<br>Runtime: %{x:.1f}s<br>EL Error: %{y:.2f}%<extra></extra>",
+        ))
+
+    fig.add_hline(y=1.0, line_dash="dot", line_color="#22c55e",
+                  annotation_text="1% quality threshold")
+    fig.update_layout(
+        title="Runtime vs Forecast Quality (EL error)",
+        xaxis_title="Total Runtime (s)",
+        yaxis_title="EL % Error vs Reference",
+    )
+    style_chart(fig, 380)
+    st.plotly_chart(fig, use_container_width=True, key="sq-runtime-vs-quality")
+    st.caption("Marker size scales with n_simulations. Bottom-left corner = best efficiency.")
+
+
+def _chart_stability(df: pd.DataFrame) -> None:
+    """Chart 4: EL spread across repeated runs at same sim count + config."""
+    work = df.copy()
+    work["n_simulations"] = pd.to_numeric(work["n_simulations"], errors="coerce")
+    work["_be"] = work["backend"].fillna("unknown").astype(str)
+    work["_dt"] = work["dtype"].fillna("unknown").astype(str)
+    work["expected_loss"] = pd.to_numeric(work.get("expected_loss"), errors="coerce")
+
+    grp = work.dropna(subset=["n_simulations", "expected_loss"]).groupby(
+        ["_be", "_dt", "n_simulations"]
+    )["expected_loss"]
+    counts = grp.count()
+
+    if (counts > 1).sum() == 0:
+        st.info(
+            "Stability analysis requires repeated runs at the same simulation count and backend/dtype. "
+            "No such duplicates found in current data.\n\n"
+            "Launch multiple runs with identical configuration to observe variance bands."
+        )
+        return
+
+    stats = grp.agg(["mean", "std", "min", "max", "count"]).reset_index()
+    stats = stats[stats["count"] > 1].copy()
+    stats["cv"] = (stats["std"] / stats["mean"].abs()).fillna(0) * 100
+    stats["label"] = (
+        stats["_be"] + "/" + stats["_dt"]
+        + " @ " + stats["n_simulations"].astype(int).astype(str) + " sims"
+    )
+
+    fig = go.Figure()
+    for _, row in stats.iterrows():
+        mean_m = row["mean"] / 1e6
+        std_m = float(row["std"]) / 1e6 if pd.notna(row["std"]) else 0.0
+        fig.add_trace(go.Bar(
+            x=[row["label"]],
+            y=[mean_m],
+            error_y=dict(type="data", array=[std_m], visible=True),
+            name=str(row["label"]),
+            text=[f"CV: {row['cv']:.1f}% (n={int(row['count'])})"],
+            textposition="outside",
+            marker_color=COLORS.get("primary", "#3b82f6"),
+        ))
+
+    fig.update_layout(
+        title="EL Stability Across Repeated Runs",
+        xaxis_title="Config Group",
+        yaxis_title="Expected Loss ($M)",
+        showlegend=False,
+    )
+    style_chart(fig, 380)
+    st.plotly_chart(fig, use_container_width=True, key="sq-stability")
+    st.caption("Error bars = ±1 std dev. CV = coefficient of variation. Lower CV means more stable output.")
+
+
+def _chart_step_scaling(df: pd.DataFrame) -> None:
+    """Chart 5: Selected step runtime vs n_simulations."""
+    step_opts = {
+        "monte_carlo_seconds": "Monte Carlo",
+        "baseline_scoring_seconds": "Baseline Scoring",
+        "loan_specific_sensitivity_seconds": "Loan Sensitivities",
+        "sensitivity_seconds": "Sensitivity",
+        "total_runtime_seconds": "Total Runtime",
+    }
+    available = {k: v for k, v in step_opts.items()
+                 if k in df.columns and df[k].notna().any()}
+
+    if not available:
+        st.info("Step scaling chart requires runtime_summary.csv data. No step timing available yet.")
+        return
+
+    sel = st.selectbox(
+        "Step",
+        options=list(available.keys()),
+        format_func=lambda k: available[k],
+        key="sq-step-sel",
+    )
+
+    plot_df = df.dropna(subset=["n_simulations", sel]).copy()
+    plot_df["n_simulations"] = pd.to_numeric(plot_df["n_simulations"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["n_simulations"]).sort_values("n_simulations")
+
+    if plot_df.empty:
+        st.info("No data for the selected step.")
+        return
+
+    palette = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444"]
+    fig = go.Figure()
+    for i, be in enumerate(plot_df["backend"].fillna("unknown").unique()):
+        sub = plot_df[plot_df["backend"].fillna("unknown") == be]
+        fig.add_trace(go.Scatter(
+            x=sub["n_simulations"],
+            y=pd.to_numeric(sub[sel], errors="coerce"),
+            mode="lines+markers",
+            name=str(be),
+            line=dict(color=palette[i % len(palette)]),
+            marker=dict(size=9),
+            hovertemplate=f"{be}<br>Sims: %{{x:,}}<br>Time: %{{y:.1f}}s<extra></extra>",
+        ))
+
+    ns_vals = plot_df["n_simulations"].dropna()
+    xtype = "log" if (ns_vals.max() / max(ns_vals.min(), 1)) >= 10 else "linear"
+    fig.update_layout(
+        title=f"{available[sel]} Scaling",
+        xaxis_title="N Simulations" + (" (log)" if xtype == "log" else ""),
+        yaxis_title="Duration (s)",
+        xaxis_type=xtype,
+    )
+    style_chart(fig, 380)
+    st.plotly_chart(fig, use_container_width=True, key="sq-step-scaling")
+
+
+def _render_sim_count_analytics(df: pd.DataFrame) -> None:
+    """Render the 'Forecast Quality vs Simulation Count' analytics section."""
+    work = df.copy()
+    work["n_simulations"] = pd.to_numeric(work["n_simulations"], errors="coerce")
+
+    if not work["n_simulations"].notna().any():
+        st.info(
+            "Forecast quality analytics require n_simulations data. "
+            "No completed runs with simulation count info found."
+        )
+        return
+
+    work = _compute_convergence_metrics(work)
+
+    _render_sim_count_recommendation(work)
+    st.markdown("---")
+
+    tab_conv, tab_err, tab_rt, tab_stab, tab_step = st.tabs([
+        "Convergence", "Error to Reference", "Runtime vs Quality",
+        "Stability", "Step Scaling",
+    ])
+    with tab_conv:
+        _chart_convergence(work)
+    with tab_err:
+        _chart_error_to_reference(work)
+    with tab_rt:
+        _chart_runtime_vs_quality(work)
+    with tab_stab:
+        _chart_stability(work)
+    with tab_step:
+        _chart_step_scaling(work)
+
+
 def _render_cross_run_analytics(df: pd.DataFrame) -> None:
     """Render the cross-run analytics section: summary KPIs, charts, table."""
     completed = df[df["status"] == "completed"].copy()
@@ -289,7 +763,10 @@ def _render_cross_run_analytics(df: pd.DataFrame) -> None:
     if not rt_series.empty:
         kpi_cols[3].metric("Avg runtime", f"{rt_series.mean():.0f}s")
 
-    tab_charts, tab_table = st.tabs(["Charts", "Comparison Table"])
+    tab_charts, tab_forecast, tab_table = st.tabs(["Charts", "Forecast Quality", "Comparison Table"])
+
+    with tab_forecast:
+        _render_sim_count_analytics(completed)
 
     with tab_charts:
         # Four charts in a 2×2 grid
@@ -482,6 +959,64 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
                                              help="0 = auto")
             pyarrow_threads = pc3.number_input("PyArrow threads", min_value=1, value=1)
 
+        with st.expander("Sample Efficiency (optional)", expanded=True):
+            se1, se2 = st.columns(2)
+            antithetic_variates = se1.checkbox(
+                "Antithetic variates",
+                value=True,
+                help=(
+                    "Draw paired +z / −z shocks to reduce estimator variance "
+                    "without extra model evaluations. Recommended — nearly free."
+                ),
+            )
+            adaptive_stopping = se2.checkbox(
+                "Adaptive stopping",
+                value=False,
+                help=(
+                    "Stop early when key risk metrics have converged within the "
+                    "chosen tolerance across consecutive simulation batches."
+                ),
+            )
+
+            if adaptive_stopping:
+                as1, as2, as3 = st.columns(3)
+                sim_batch_size = as1.number_input(
+                    "Sim batch size",
+                    min_value=100,
+                    max_value=500_000,
+                    value=10_000,
+                    step=1_000,
+                    help="Simulations per convergence-check batch.",
+                )
+                conv_tolerance = as2.number_input(
+                    "Convergence tolerance",
+                    min_value=0.001,
+                    max_value=0.5,
+                    value=0.01,
+                    step=0.001,
+                    format="%.3f",
+                    help="Stop when all tracked metrics change less than this fraction (1% = 0.01).",
+                )
+                max_sims_override = as3.number_input(
+                    "Max simulations",
+                    min_value=0,
+                    max_value=1_000_000,
+                    value=0,
+                    step=10_000,
+                    help="Hard cap on simulations (0 = use Simulations field above).",
+                )
+                conv_metrics = st.multiselect(
+                    "Convergence metrics",
+                    options=["expected_loss", "var_99", "var_999", "es_99"],
+                    default=["expected_loss", "var_99"],
+                    help="All selected metrics must converge before early stopping fires.",
+                )
+            else:
+                sim_batch_size = 10_000
+                conv_tolerance = 0.01
+                max_sims_override = 0
+                conv_metrics = ["expected_loss", "var_99"]
+
         submitted = st.form_submit_button("▶ Run Simulation", type="primary")
 
     if submitted:
@@ -506,6 +1041,18 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             cmd += ["--cpu-workers", str(int(cpu_workers))]
         if torch_threads > 0:
             cmd += ["--torch-threads-per-worker", str(int(torch_threads))]
+        if antithetic_variates:
+            cmd += ["--antithetic-variates"]
+        if adaptive_stopping:
+            cmd += [
+                "--adaptive-stopping",
+                "--simulation-batch-size", str(int(sim_batch_size)),
+                "--convergence-tolerance", str(conv_tolerance),
+            ]
+            if max_sims_override > 0:
+                cmd += ["--max-simulations", str(int(max_sims_override))]
+            if conv_metrics:
+                cmd += ["--convergence-metrics"] + conv_metrics
 
         try:
             log_file = open(log_path, "w")
@@ -539,6 +1086,12 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             "cpu_workers": int(cpu_workers) if cpu_workers > 0 else None,
             "torch_threads_per_worker": int(torch_threads) if torch_threads > 0 else None,
             "pyarrow_threads": int(pyarrow_threads),
+            "antithetic_variates": antithetic_variates,
+            "adaptive_stopping": adaptive_stopping,
+            "simulation_batch_size": int(sim_batch_size) if adaptive_stopping else None,
+            "convergence_tolerance": conv_tolerance if adaptive_stopping else None,
+            "max_simulations_override": int(max_sims_override) if adaptive_stopping and max_sims_override > 0 else None,
+            "convergence_metrics": conv_metrics if adaptive_stopping else None,
         }
         write_state(
             prefix=prefix,
@@ -551,6 +1104,7 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
 
         st.session_state.setdefault("procs", {})[prefix] = proc
         st.session_state.setdefault("active_prefixes", []).append(prefix)
+        st.session_state["_just_submitted"] = prefix
         st.rerun()
 
 
@@ -866,6 +1420,10 @@ def render() -> None:
     st.session_state.setdefault("active_prefixes", [])
 
     all_runs = discover_runs()
+
+    if "_just_submitted" in st.session_state:
+        submitted_prefix = st.session_state.pop("_just_submitted")
+        st.success(f"✓ Simulation submitted: **{submitted_prefix}**")
 
     _render_launch_form(all_runs)
 

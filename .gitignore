@@ -80,3 +80,4 @@ mlruns/
 models/mc_loss_distribution.csv
 models/mc_scenarios.csv
 data/processed/loan_level_combined.parquet
+.compound-engineering/*.local.yaml

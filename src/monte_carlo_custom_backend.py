@@ -512,6 +512,7 @@ def _generate_correlated_scenarios_tensor(
     random_seed: int = 42,
     backend: str = "cpu",
     dtype: str | None = "float32",
+    antithetic: bool = False,
 ):
     """Internal torch implementation of correlated macro scenario generation."""
     torch = _import_torch()
@@ -548,7 +549,12 @@ def _generate_correlated_scenarios_tensor(
     except RuntimeError:
         L = torch.linalg.cholesky(corr.to("cpu")).to(device)
 
-    Z = torch.randn((n_simulations, n_vars), device=device, dtype=torch_dtype)
+    if antithetic:
+        n_half = (n_simulations + 1) // 2
+        Z_half = torch.randn((n_half, n_vars), device=device, dtype=torch_dtype)
+        Z = torch.cat([Z_half, -Z_half], dim=0)[:n_simulations]
+    else:
+        Z = torch.randn((n_simulations, n_vars), device=device, dtype=torch_dtype)
     correlated_Z = Z @ L.T
 
     means = torch.tensor(
@@ -1169,6 +1175,7 @@ def run_monte_carlo(
     torch_threads_per_worker: int = 1,
     pyarrow_threads: int = DEFAULT_PYARROW_THREADS,
     return_tensors: bool = False,
+    antithetic: bool = False,
 ):
     """
     Run Monte Carlo simulation on the requested backend.
@@ -1212,6 +1219,7 @@ def run_monte_carlo(
         random_seed=random_seed,
         backend=backend,
         dtype=dtype,
+        antithetic=antithetic,
     )
 
     multipliers_t, multiplier_names = _compute_scenario_multipliers_tensor(
