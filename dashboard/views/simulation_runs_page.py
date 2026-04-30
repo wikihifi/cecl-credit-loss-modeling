@@ -20,6 +20,11 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import COLORS, info_box, section_header, style_chart, warning_box
 from run_state import MODEL_DIR, RunInfo, discover_runs, is_alive, is_run_complete, read_state, update_state, write_state
+from dataset_helpers import (
+    get_dataset_presets,
+    get_portfolio_meta as _get_portfolio_meta,
+    portfolio_display_label as _portfolio_display_label,
+)
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 RUNNER_SCRIPT = REPO_ROOT / "src" / "run_monte_carlo_custom_backend.py"
@@ -50,8 +55,8 @@ _INDEX_COLUMNS = [
     "baseline_scoring_seconds", "loan_specific_sensitivity_seconds",
     "monte_carlo_seconds", "sensitivity_seconds",
     "loss_rate", "improvement_label",
+    "portfolio_path", "portfolio_label",
 ]
-
 
 # ---------------------------------------------------------------------------
 # Cached data loaders (keyed on path so each prefix gets its own cache entry)
@@ -156,6 +161,8 @@ def _build_run_record(run: RunInfo) -> dict | None:
         "sensitivity_seconds": _get(summary_row, "sensitivity_seconds"),
         "loss_rate": None,
         "improvement_label": "unknown",
+        "portfolio_path": _get(cfg, "portfolio_path"),
+        "portfolio_label": _get(cfg, "portfolio_label"),
     }
 
     el = record["expected_loss"]
@@ -941,6 +948,39 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
         r.config.get("backend") for r in all_runs if r.status == "running"
     }
 
+    # Dataset selection lives OUTSIDE the form so conditional widgets render
+    # immediately when the user changes the source radio (st.form batches all
+    # widget events until submit, which prevents conditional re-rendering).
+    with st.expander("Dataset (optional)"):
+        ds_mode = st.radio(
+            "Source",
+            ["Default", "Preset", "Custom path"],
+            horizontal=True,
+            key="launch_ds_mode",
+            help="Default = runner auto-detects the best available dataset.",
+        )
+        ds_preset_key = None
+        ds_custom_path = ""
+        if ds_mode == "Preset":
+            _presets = get_dataset_presets()
+            if _presets:
+                ds_preset_key = st.selectbox(
+                    "Dataset",
+                    options=list(_presets.keys()),
+                    format_func=lambda k: _presets[k]["label"],
+                    key="launch_ds_preset",
+                )
+                st.caption(_presets[ds_preset_key]["description"])
+            else:
+                st.warning("No preset datasets found under `data/processed/`. Use Custom path.")
+        elif ds_mode == "Custom path":
+            ds_custom_path = st.text_input(
+                "Portfolio path",
+                value=st.session_state.get("_last_ds_custom_path", ""),
+                placeholder="/absolute/path/to/dataset.parquet",
+                key="launch_ds_custom",
+            )
+
     with st.form("launch_form"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1024,6 +1064,35 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             st.warning(f"A {backend} run is already active. Wait for it to finish before starting another.")
             return
 
+        # ── Resolve dataset selection ────────────────────────────────────
+        portfolio_path_arg: str | None = None
+        portfolio_label = "Default (auto-detected)"
+        portfolio_source = "default"
+
+        if ds_mode == "Preset" and ds_preset_key:
+            _presets = get_dataset_presets()
+            p_info = _presets.get(ds_preset_key, {})
+            portfolio_path_arg = p_info.get("path")
+            portfolio_label = p_info.get("label", ds_preset_key)
+            portfolio_source = "preset"
+        elif ds_mode == "Custom path" and ds_custom_path.strip():
+            portfolio_path_arg = ds_custom_path.strip()
+            portfolio_label = Path(portfolio_path_arg).name
+            portfolio_source = "custom"
+
+        if portfolio_path_arg is not None:
+            meta = _get_portfolio_meta(portfolio_path_arg)
+            if not meta["exists"]:
+                st.error(f"Dataset path not found: `{portfolio_path_arg}`")
+                return
+            if portfolio_source == "custom":
+                st.session_state["_last_ds_custom_path"] = portfolio_path_arg
+            row_info = (
+                f"{meta['row_count']:,} rows · {meta['file_count']} file(s)"
+                if meta.get("row_count") else f"{meta['file_count']} file(s)"
+            )
+            st.info(f"Dataset: **{portfolio_label}** — {row_info}")
+
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         prefix = f"mc_{backend}_{ts}"
         log_path = MODEL_DIR / f"{prefix}.log"
@@ -1041,6 +1110,8 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             cmd += ["--cpu-workers", str(int(cpu_workers))]
         if torch_threads > 0:
             cmd += ["--torch-threads-per-worker", str(int(torch_threads))]
+        if portfolio_path_arg is not None:
+            cmd += ["--portfolio-path", portfolio_path_arg]
         if antithetic_variates:
             cmd += ["--antithetic-variates"]
         if adaptive_stopping:
@@ -1092,6 +1163,9 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             "convergence_tolerance": conv_tolerance if adaptive_stopping else None,
             "max_simulations_override": int(max_sims_override) if adaptive_stopping and max_sims_override > 0 else None,
             "convergence_metrics": conv_metrics if adaptive_stopping else None,
+            "portfolio_path": portfolio_path_arg,
+            "portfolio_label": portfolio_label,
+            "portfolio_source": portfolio_source,
         }
         write_state(
             prefix=prefix,
@@ -1269,6 +1343,21 @@ def _render_run_charts(run: RunInfo) -> None:
 
 def _render_config_table(run: RunInfo) -> None:
     cfg = run.config or {}
+
+    # Dataset badge — shown above the table for prominence
+    p_path = cfg.get("portfolio_path")
+    p_label = cfg.get("portfolio_label")
+    display_label = _portfolio_display_label(p_path, p_label)
+    st.markdown(
+        f'<div style="background:#f0f9ff;border-left:3px solid #0ea5e9;border-radius:0 6px 6px 0;'
+        f'padding:6px 12px;margin-bottom:8px;font-size:0.85rem;">'
+        f'<strong>Dataset:</strong> {display_label}'
+        + (f'<br><span style="font-size:0.75rem;color:#64748b;font-family:monospace;">{p_path}</span>'
+           if p_path else "")
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
     display_fields = [
         ("backend", "Backend"),
         ("n_simulations", "Simulations"),
@@ -1279,11 +1368,15 @@ def _render_config_table(run: RunInfo) -> None:
         ("pyarrow_threads", "PyArrow threads"),
         ("scenario_batch_size", "Scenario batch size"),
         ("loan_chunk_size", "Loan chunk size"),
+        ("antithetic_variates", "Antithetic variates"),
+        ("adaptive_stopping", "Adaptive stopping"),
+        ("portfolio_label", "Dataset"),
+        ("portfolio_source", "Dataset source"),
     ]
     rows = [
         {"Parameter": label, "Value": str(cfg.get(key, "—") or "—")}
         for key, label in display_fields
-        if key != "_legacy"
+        if key != "_legacy" and cfg.get(key) not in (None, "")
     ]
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 

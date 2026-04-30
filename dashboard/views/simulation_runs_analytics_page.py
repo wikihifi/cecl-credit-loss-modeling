@@ -23,6 +23,7 @@ from utils import COLORS, info_box, section_header, style_chart
 from views.simulation_runs_page import (
     STEP_NAME_MAP,
     _LABEL_COLORS,
+    get_dataset_presets,
     _build_run_record,
     _chart_convergence,
     _chart_error_to_reference,
@@ -30,7 +31,9 @@ from views.simulation_runs_page import (
     _chart_stability,
     _chart_step_scaling,
     _get_loss_series,
+    _get_portfolio_meta,
     _poll_active_runs,
+    _portfolio_display_label,
     _render_config_table,
     _render_launch_form,
     _render_raw_log,
@@ -190,11 +193,63 @@ def _render_active_run_panel(all_runs: list[RunInfo]) -> None:
 # Compact outcome analytics
 # ---------------------------------------------------------------------------
 
+def _dataset_options(completed: pd.DataFrame) -> dict:
+    """Return {display_label: raw_path_or_None} for filter selectbox."""
+    opts: dict = {"All datasets": "__ALL__"}
+    if "portfolio_path" not in completed.columns:
+        return opts
+    paths = completed["portfolio_path"].fillna("__default__").unique().tolist()
+    for raw in paths:
+        if raw == "__default__":
+            opts["Default (auto-detected)"] = None
+        else:
+            opts[_portfolio_display_label(raw, None)] = raw
+    return opts
+
+
 def _render_analytics_dashboard(analytics_df: pd.DataFrame) -> None:
     completed = analytics_df[analytics_df["status"] == "completed"].copy()
     if completed.empty:
         st.info("Analytics available once at least one run completes.")
         return
+
+    # ── Dataset filter ───────────────────────────────────────────────────
+    ds_opts = _dataset_options(completed)
+    multi_dataset = len(ds_opts) > 2  # more than "All" + one choice
+
+    if multi_dataset:
+        sel_label = st.selectbox(
+            "Filter by dataset",
+            options=list(ds_opts.keys()),
+            key="analytics_ds_filter",
+            help="Cross-dataset comparisons can be misleading — filter to one dataset for clean analytics.",
+        )
+        sel_val = ds_opts[sel_label]
+        if sel_val != "__ALL__":
+            if sel_val is None:
+                completed = completed[completed["portfolio_path"].isna()].copy()
+            else:
+                completed = completed[completed["portfolio_path"] == sel_val].copy()
+            if completed.empty:
+                st.info("No completed runs for the selected dataset.")
+                return
+        else:
+            st.warning(
+                "⚠ Showing runs across multiple datasets. "
+                "Metrics like Expected Loss are not directly comparable across different loan books."
+            )
+    else:
+        # Single dataset — show a small badge instead of a filter
+        only_path = next(
+            (v for k, v in ds_opts.items() if v not in ("__ALL__",)), None
+        )
+        label = _portfolio_display_label(only_path, None)
+        st.markdown(
+            f'<div style="display:inline-block;background:#f0f9ff;border:1px solid #bae6fd;'
+            f'border-radius:6px;padding:3px 10px;font-size:0.78rem;color:#0369a1;margin-bottom:10px;">'
+            f'📂 Dataset: {label}</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown(
         '<p style="font-size:0.8rem;color:#64748b;margin-bottom:12px;">'
@@ -209,7 +264,9 @@ def _render_analytics_dashboard(analytics_df: pd.DataFrame) -> None:
     )
 
     with tab_outcomes:
-        _render_outcomes_tab(completed)
+        _render_outcomes_tab(completed, multi_dataset=(multi_dataset and ds_opts.get(
+            st.session_state.get("analytics_ds_filter", "All datasets")) == "__ALL__"
+        ))
 
     with tab_quality:
         _render_sim_count_analytics(completed)
@@ -218,21 +275,40 @@ def _render_analytics_dashboard(analytics_df: pd.DataFrame) -> None:
         _render_run_table(completed)
 
 
-def _render_outcomes_tab(completed: pd.DataFrame) -> None:
+def _trace_label(be: str, ds_path: str | None, multi_dataset: bool) -> str:
+    """Build a legend label: 'cpu' or 'cpu · Standard' depending on context."""
+    if not multi_dataset or not ds_path:
+        return str(be)
+    short = _portfolio_display_label(ds_path, None).split("·")[0].strip()
+    return f"{be} · {short}"
+
+
+def _render_outcomes_tab(completed: pd.DataFrame, multi_dataset: bool = False) -> None:
     row1_l, row1_r = st.columns(2)
     row2_l, row2_r = st.columns(2)
 
     palette = [COLORS["primary"], COLORS["warning"], COLORS["success"],
                COLORS["danger"], COLORS["purple"], COLORS["cyan"]]
 
-    # Chart A: Simulations vs Expected Loss by backend
+    # When cross-dataset, group by (backend, portfolio_path) instead of just backend
+    def _group_col(df: pd.DataFrame) -> pd.Series:
+        if multi_dataset and "portfolio_path" in df.columns:
+            return (df["backend"].fillna("unknown") + "||"
+                    + df["portfolio_path"].fillna("__default__"))
+        return df["backend"].fillna("unknown")
+
+    # Chart A: Simulations vs Expected Loss
     with row1_l:
         plot = completed.dropna(subset=["n_simulations", "expected_loss"]).copy()
         plot["n_simulations"] = pd.to_numeric(plot["n_simulations"], errors="coerce")
         if not plot.empty:
+            plot["_grp"] = _group_col(plot)
             fig = go.Figure()
-            for i, be in enumerate(plot["backend"].fillna("unknown").unique()):
-                sub = plot[plot["backend"].fillna("unknown") == be]
+            for i, grp in enumerate(plot["_grp"].unique()):
+                sub = plot[plot["_grp"] == grp]
+                be = grp.split("||")[0]
+                ds = grp.split("||")[1] if "||" in grp else None
+                ds = None if ds == "__default__" else ds
                 fig.add_trace(go.Scatter(
                     x=sub["n_simulations"],
                     y=sub["expected_loss"] / 1e6,
@@ -241,35 +317,42 @@ def _render_outcomes_tab(completed: pd.DataFrame) -> None:
                     textposition="top center",
                     textfont=dict(size=8),
                     marker=dict(size=11, color=palette[i % len(palette)]),
-                    name=str(be),
+                    name=_trace_label(be, ds, multi_dataset),
                     hovertemplate="%{text}<br>Sims: %{x:,}<br>EL: $%{y:,.0f}M<extra></extra>",
                 ))
-            fig.update_layout(title="Simulations vs Expected Loss",
-                              xaxis_title="N Simulations", yaxis_title="EL ($M)")
+            title = "Simulations vs Expected Loss"
+            if multi_dataset:
+                title += " ⚠ cross-dataset"
+            fig.update_layout(title=title, xaxis_title="N Simulations", yaxis_title="EL ($M)")
             style_chart(fig, 320)
             st.plotly_chart(fig, use_container_width=True, key="rds-sims-vs-el")
         else:
             st.info("Insufficient data.")
 
-    # Chart B: Runtime vs Expected Loss (efficiency view)
+    # Chart B: Runtime vs Expected Loss
     with row1_r:
         plot = completed.dropna(subset=["total_runtime_seconds", "expected_loss"]).copy()
         if not plot.empty:
+            plot["_grp"] = _group_col(plot)
             fig = go.Figure()
-            for i, be in enumerate(plot["backend"].fillna("unknown").unique()):
-                sub = plot[plot["backend"].fillna("unknown") == be]
+            for i, grp in enumerate(plot["_grp"].unique()):
+                sub = plot[plot["_grp"] == grp]
+                be = grp.split("||")[0]
+                ds = grp.split("||")[1] if "||" in grp else None
+                ds = None if ds == "__default__" else ds
                 fig.add_trace(go.Scatter(
                     x=pd.to_numeric(sub["total_runtime_seconds"], errors="coerce"),
                     y=pd.to_numeric(sub["expected_loss"], errors="coerce") / 1e6,
                     mode="markers",
-                    marker=dict(size=12, color=palette[i % len(palette)], opacity=0.85,
-                                symbol="circle"),
-                    name=str(be),
+                    marker=dict(size=12, color=palette[i % len(palette)], opacity=0.85),
+                    name=_trace_label(be, ds, multi_dataset),
                     text=sub["prefix"].str[-7:],
                     hovertemplate="%{text}<br>Runtime: %{x:.0f}s<br>EL: $%{y:,.0f}M<extra></extra>",
                 ))
-            fig.update_layout(title="Runtime vs Expected Loss",
-                              xaxis_title="Runtime (s)", yaxis_title="EL ($M)")
+            title = "Runtime vs Expected Loss"
+            if multi_dataset:
+                title += " ⚠ cross-dataset"
+            fig.update_layout(title=title, xaxis_title="Runtime (s)", yaxis_title="EL ($M)")
             style_chart(fig, 320)
             st.plotly_chart(fig, use_container_width=True, key="rds-rt-vs-el")
         else:
@@ -344,6 +427,7 @@ def _render_run_table(completed: pd.DataFrame) -> None:
         "var_99": "VaR 99% ($M)",
         "loss_rate": "Loss Rate (%)",
         "improvement_label": "Outcome",
+        "portfolio_label": "Dataset",
         "source": "Source",
     }
     tbl = completed[[c for c in display if c in completed.columns]].copy()
