@@ -1,14 +1,14 @@
 feature,iv,interpretation
-borrower_credit_score,0.6016971873441338,Suspicious
-fico_x_unemployment,0.5768499886239338,Suspicious
-original_ltv,0.19807185074512476,Medium
-original_cltv,0.167677750633245,Medium
-original_interest_rate,0.14820935628507947,Medium
-dti,0.12716821703107237,Medium
-original_loan_term,0.11341503841254369,Medium
-has_mortgage_insurance,0.056711952293666906,Weak
-is_cashout_refi,0.036392800900078945,Weak
-has_coborrower,0.03554469967982835,Weak
-hpi_national,0.01947473687689017,Not useful
-fed_funds_rate,0.019416872504440616,Not useful
-gdp_growth_pct,0.017827679213233857,Not useful
+borrower_credit_score,0.6007594960531251,Suspicious
+fico_x_unemployment,0.5763666516769396,Suspicious
+original_ltv,0.19796864988289928,Medium
+original_cltv,0.16766348711488732,Medium
+original_interest_rate,0.14841001962945355,Medium
+dti,0.12716730711015675,Medium
+original_loan_term,0.11354650604774658,Medium
+has_mortgage_insurance,0.056652921606048984,Weak
+is_cashout_refi,0.03628379685550453,Weak
+has_coborrower,0.03568174095128774,Weak
+hpi_national,0.019638290869444106,Not useful
+fed_funds_rate,0.019574877577671713,Not useful
+gdp_growth_pct,0.018029951186901448,Not useful

@@ -233,6 +233,24 @@ def parse_args():
             "Default: expected_loss var_99."
         ),
     )
+    parser.add_argument(
+        "--pd-bundle-dir",
+        default=None,
+        help=(
+            "Path to a model bundle directory containing PD artifacts "
+            "(pd_logistic_regression.pkl, woe_results.pkl, selected_features.txt). "
+            "If not provided, loads from the global models/ directory."
+        ),
+    )
+    parser.add_argument(
+        "--lgd-bundle-dir",
+        default=None,
+        help=(
+            "Path to a model bundle directory containing LGD artifacts "
+            "(lgd_ols.pkl, lgd_features.txt). "
+            "If not provided, loads from the global models/ directory."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -649,13 +667,18 @@ def main():
     step_start = time.time()
     print("\nStep 1: Loading portfolio and scoring baseline...")
 
-    pd_model = joblib.load(MODEL_DIR / "pd_logistic_regression.pkl")
-    woe_results = joblib.load(MODEL_DIR / "woe_results.pkl")
-    with open(MODEL_DIR / "selected_features.txt") as f:
+    pd_dir = Path(args.pd_bundle_dir) if args.pd_bundle_dir else MODEL_DIR
+    lgd_dir = Path(args.lgd_bundle_dir) if args.lgd_bundle_dir else MODEL_DIR
+    print(f"  PD artifacts: {pd_dir}")
+    print(f"  LGD artifacts: {lgd_dir}")
+
+    pd_model = joblib.load(pd_dir / "pd_logistic_regression.pkl")
+    woe_results = joblib.load(pd_dir / "woe_results.pkl")
+    with open(pd_dir / "selected_features.txt") as f:
         pd_features = [line.strip() for line in f if line.strip()]
 
-    lgd_model = joblib.load(MODEL_DIR / "lgd_ols.pkl")
-    with open(MODEL_DIR / "lgd_features.txt") as f:
+    lgd_model = joblib.load(lgd_dir / "lgd_ols.pkl")
+    with open(lgd_dir / "lgd_features.txt") as f:
         lgd_features = [line.strip() for line in f if line.strip()]
 
     required_columns = build_step1_required_columns(pd_features, lgd_features)
