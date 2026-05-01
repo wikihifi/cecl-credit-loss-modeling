@@ -1585,7 +1585,7 @@ def _poll_active_runs(all_runs: list[RunInfo]) -> None:
                 update_state(run.prefix, terminal, 0 if terminal == "completed" else -1)
 
     still_active = [p for p in procs.values() if p.poll() is None]
-    if still_active:
+    if still_active and st.session_state.get("sim_runs_auto_refresh", False):
         time.sleep(3)
         st.rerun()
 
@@ -1629,6 +1629,17 @@ def render() -> None:
         st.markdown("---")
 
     section_header("Run Log")
+
+    auto_refresh = st.toggle(
+        "Auto-refresh active runs",
+        value=st.session_state.get("sim_runs_auto_refresh", False),
+        key="sim_runs_auto_refresh",
+    )
+    if auto_refresh:
+        st.caption("Page refreshes every ~3 seconds while runs are active.")
+    else:
+        st.caption("Auto-refresh is off. Use the refresh button on each run card during long runs.")
+
     for run in all_runs:
         _render_run_card(run)
 

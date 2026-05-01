@@ -623,4 +623,14 @@ def render() -> None:
     _render_run_history(all_runs)
 
     # ── Polling ─────────────────────────────────────────────────────────────
+    auto_refresh = st.toggle(
+        "Auto-refresh active runs",
+        value=st.session_state.get("sim_runs_auto_refresh", False),
+        key="sim_runs_auto_refresh",
+    )
+    if auto_refresh:
+        st.caption("Page refreshes every ~3 seconds while runs are active.")
+    else:
+        st.caption("Auto-refresh is off. Toggle on to watch live progress.")
+
     _poll_active_runs(all_runs)
