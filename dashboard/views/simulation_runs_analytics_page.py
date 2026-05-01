@@ -583,7 +583,15 @@ def render() -> None:
     st.session_state.setdefault("procs", {})
     st.session_state.setdefault("active_prefixes", [])
 
-    all_runs = discover_runs()
+    auto_refresh = st.toggle(
+        "Auto-refresh active runs",
+        value=st.session_state.get("sim_runs_auto_refresh", False),
+        key="sim_runs_auto_refresh",
+    )
+    refresh_now = st.button("Refresh run state", key="sim_runs_analytics_manual_refresh")
+    allow_mutation = bool(auto_refresh or refresh_now)
+
+    all_runs = discover_runs(reconcile=allow_mutation)
 
     if "_just_submitted" in st.session_state:
         submitted_prefix = st.session_state.pop("_just_submitted")
@@ -633,14 +641,9 @@ def render() -> None:
     _render_run_history(all_runs)
 
     # ── Polling ─────────────────────────────────────────────────────────────
-    auto_refresh = st.toggle(
-        "Auto-refresh active runs",
-        value=st.session_state.get("sim_runs_auto_refresh", False),
-        key="sim_runs_auto_refresh",
-    )
     if auto_refresh:
         st.caption("Page refreshes every ~3 seconds while runs are active.")
     else:
-        st.caption("Auto-refresh is off. Toggle on to watch live progress.")
+        st.caption("Auto-refresh is off. This page is read-only until you click `Refresh run state`.")
 
-    _poll_active_runs(all_runs)
+    _poll_active_runs(all_runs, allow_mutation=allow_mutation, allow_auto_rerun=auto_refresh)

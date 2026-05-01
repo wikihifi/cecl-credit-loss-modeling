@@ -172,7 +172,7 @@ def is_alive(pid: int, pid_create_time: float, tolerance: float = 5.0) -> bool:
 # Run discovery
 # ---------------------------------------------------------------------------
 
-def discover_runs() -> list[RunInfo]:
+def discover_runs(*, reconcile: bool = True) -> list[RunInfo]:
     """
     Discover all runs in models/, sorted newest-first.
 
@@ -192,7 +192,7 @@ def discover_runs() -> list[RunInfo]:
         if run is None:
             continue
         # Reconcile: sidecar says running but process is gone
-        if run.status == "running" and not is_alive(run.pid, run.pid_create_time or 0.0):
+        if reconcile and run.status == "running" and not is_alive(run.pid, run.pid_create_time or 0.0):
             terminal = "completed" if is_run_complete(prefix) else "failed"
             exit_code = 0 if terminal == "completed" else -1
             update_state(prefix, terminal, exit_code)
