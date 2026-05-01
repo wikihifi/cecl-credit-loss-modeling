@@ -508,7 +508,10 @@ def _render_compact_run_card(run: RunInfo, risk_df: pd.DataFrame | None, summary
         if status == "running":
             tail = read_log_tail(run.log_path or "", n=30)
             st.code(tail or "(log initializing…)", language=None)
-            st.caption("In progress — page auto-refreshes every ~3 seconds.")
+            if st.session_state.get("sim_runs_auto_refresh", False):
+                st.caption("In progress — page auto-refreshes every ~3 seconds.")
+            else:
+                st.caption("In progress — enable Auto-refresh to watch live progress.")
             return
 
         if status == "completed":
