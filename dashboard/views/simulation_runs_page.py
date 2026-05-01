@@ -27,10 +27,9 @@ from dataset_helpers import (
 )
 from portfolio_cache import dataset_fingerprint as _dataset_fingerprint
 from model_bundle import (
-    find_compatible_bundles as _find_compatible_bundles,
-    latest_mc_ready_bundle as _latest_mc_ready_bundle,
-    legacy_is_mc_ready as _legacy_is_mc_ready,
-    legacy_bundle_info as _legacy_bundle_info,
+    list_bundles as _list_bundles,
+    legacy_pd_exists as _legacy_pd_exists,
+    legacy_lgd_exists as _legacy_lgd_exists,
 )
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -997,78 +996,91 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
                 key="launch_ds_custom",
             )
 
-    # ── PD/LGD model bundle selector ────────────────────────────────────────
-    # Resolve the dataset path (preview-only — same logic as submit handler)
-    _preview_portfolio_path = None
-    if ds_mode == "Preset" and ds_preset_key:
-        _prev_presets = get_dataset_presets()
-        _preview_portfolio_path = _prev_presets.get(ds_preset_key, {}).get("path")
-    elif ds_mode == "Custom path" and ds_custom_path.strip():
-        _preview_portfolio_path = ds_custom_path.strip()
+    # ── PD / LGD model bundle selectors (independent) ───────────────────────
+    # Simulation dataset (portfolio path) is separate from the PD/LGD training
+    # dataset. Do not filter bundle options by the simulation dataset fingerprint.
+    with st.expander("PD / LGD Model Bundles", expanded=True):
+        st.caption(
+            "Monte Carlo uses both a **PD model bundle** and an **LGD model bundle**. "
+            "Select each independently — they may come from different training runs."
+        )
 
-    _ds_fp = _dataset_fingerprint(_preview_portfolio_path) if _preview_portfolio_path else None
-    _mc_ready_bundle = _latest_mc_ready_bundle(_ds_fp) if _ds_fp else None
-    _compatible = _find_compatible_bundles(_ds_fp) if _ds_fp else []
-    _mc_ready_compatible = [b for b in _compatible if b["is_mc_ready"]]
+        # Build PD options: [(label, dir_str, fingerprint), ...]
+        _pd_bundles = _list_bundles(model_type="pd")
+        _pd_opts: list = []
+        for _b in _pd_bundles:
+            _ts = (_b["timestamp"] or "")[:16]
+            _ds = _b["dataset_label"] or (Path(_b["dataset_path"]).name if _b["dataset_path"] else "")
+            _parts = [p for p in [_ds, _ts] if p]
+            _pd_opts.append((" · ".join(_parts) if _parts else _b["bundle_id"],
+                             str(_b["bundle_dir"]), _b["dataset_fingerprint"]))
+        if _legacy_pd_exists():
+            _pd_opts.append(("Legacy (global models/ files)", str(MODEL_DIR), ""))
 
-    with st.expander("PD/LGD Model Bundle", expanded=True):
-        # Build options list
-        _bundle_options = []  # (display_label, pd_bundle_dir_str, lgd_bundle_dir_str)
+        # Build LGD options
+        _lgd_bundles = _list_bundles(model_type="lgd")
+        _lgd_opts: list = []
+        for _b in _lgd_bundles:
+            _ts = (_b["timestamp"] or "")[:16]
+            _ds = _b["dataset_label"] or (Path(_b["dataset_path"]).name if _b["dataset_path"] else "")
+            _parts = [p for p in [_ds, _ts] if p]
+            _lgd_opts.append((" · ".join(_parts) if _parts else _b["bundle_id"],
+                              str(_b["bundle_dir"]), _b["dataset_fingerprint"]))
+        if _legacy_lgd_exists():
+            _lgd_opts.append(("Legacy (global models/ files)", str(MODEL_DIR), ""))
 
-        for b in _mc_ready_compatible:
-            ts = b["timestamp"][:16] if b["timestamp"] else ""
-            lbl = f"{b['bundle_id']} · {ts}" if ts else b["bundle_id"]
-            _bundle_options.append((
-                f"Bundle: {lbl}",
-                str(b["bundle_dir"]),
-                str(b["bundle_dir"]),
-            ))
-
-        if _legacy_is_mc_ready():
-            from model_bundle import MODEL_DIR as _MD
-            _bundle_options.append((
-                "Legacy (global models/ files)",
-                str(_MD),
-                str(_MD),
-            ))
-
-        if not _bundle_options:
-            if _ds_fp:
-                st.warning(
-                    "No compatible PD+LGD bundle found for the selected dataset. "
-                    "Train PD and LGD models on this dataset first (PD Model / LGD Model pages), "
-                    "then return here to run Monte Carlo.",
-                    icon="⚠️",
-                )
-                _selected_pd_bundle_dir = None
-                _selected_lgd_bundle_dir = None
-            else:
-                # Default dataset — check legacy
-                if _legacy_is_mc_ready():
-                    st.success("Using legacy global model artifacts from `models/`.")
-                    from model_bundle import MODEL_DIR as _MD
-                    _selected_pd_bundle_dir = str(_MD)
-                    _selected_lgd_bundle_dir = str(_MD)
-                else:
-                    st.warning("No PD/LGD models found. Run PD and LGD training first.")
-                    _selected_pd_bundle_dir = None
-                    _selected_lgd_bundle_dir = None
+        # PD selector
+        if not _pd_opts:
+            st.warning("No PD model bundles found. Train a PD model on the PD Model page first.")
+            _selected_pd_bundle_dir = None
+            _selected_pd_label = None
+            _pd_fp = None
         else:
-            _bundle_labels = [o[0] for o in _bundle_options]
-            _bi = st.selectbox(
-                "Model bundle",
-                options=range(len(_bundle_options)),
-                format_func=lambda i: _bundle_labels[i],
-                key="launch_model_bundle",
-                help="Select which PD+LGD model artifacts to use for this simulation.",
+            _pd_i = st.selectbox(
+                "PD model bundle",
+                options=range(len(_pd_opts)),
+                format_func=lambda i: _pd_opts[i][0],
+                key="launch_pd_bundle",
+                help="Probability-of-default model artifacts for this simulation.",
             )
-            _selected_pd_bundle_dir = _bundle_options[_bi][1]
-            _selected_lgd_bundle_dir = _bundle_options[_bi][2]
-            _sel = _bundle_options[_bi]
-            if "Legacy" not in _sel[0]:
-                st.caption("PD and LGD artifacts loaded from the selected bundle.")
+            _selected_pd_bundle_dir = _pd_opts[_pd_i][1]
+            _selected_pd_label = _pd_opts[_pd_i][0]
+            _pd_fp = _pd_opts[_pd_i][2] or None
+
+        # LGD selector
+        if not _lgd_opts:
+            st.warning("No LGD model bundles found. Train an LGD model on the LGD Model page first.")
+            _selected_lgd_bundle_dir = None
+            _selected_lgd_label = None
+            _lgd_fp = None
+        else:
+            _lgd_i = st.selectbox(
+                "LGD model bundle",
+                options=range(len(_lgd_opts)),
+                format_func=lambda i: _lgd_opts[i][0],
+                key="launch_lgd_bundle",
+                help="Loss-given-default model artifacts for this simulation.",
+            )
+            _selected_lgd_bundle_dir = _lgd_opts[_lgd_i][1]
+            _selected_lgd_label = _lgd_opts[_lgd_i][0]
+            _lgd_fp = _lgd_opts[_lgd_i][2] or None
+
+        # Compatibility note
+        if _selected_pd_bundle_dir and _selected_lgd_bundle_dir:
+            _pd_legacy = not _pd_fp
+            _lgd_legacy = not _lgd_fp
+            if _pd_legacy or _lgd_legacy:
+                st.info(
+                    "One or both bundles are legacy global model files. "
+                    "Train dataset-specific bundles on the PD Model / LGD Model pages for explicit lineage."
+                )
+            elif _pd_fp == _lgd_fp:
+                st.success("PD and LGD bundles share the same training dataset lineage.")
             else:
-                st.caption("Using global model files. Train a dataset-specific bundle for explicit lineage.")
+                st.warning(
+                    "Selected PD and LGD bundles were trained on different datasets. "
+                    "Proceed only if this is intentional."
+                )
 
     with st.form("launch_form"):
         col1, col2, col3 = st.columns(3)
@@ -1156,8 +1168,8 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
         # ── Block if no compatible PD/LGD bundle ─────────────────────────
         if _selected_pd_bundle_dir is None or _selected_lgd_bundle_dir is None:
             st.error(
-                "Cannot launch Monte Carlo: no compatible PD/LGD model bundle available. "
-                "Train PD and LGD models on the selected dataset first."
+                "Cannot launch Monte Carlo: a PD model bundle and an LGD model bundle are both required. "
+                "Train the missing model(s) on the PD Model / LGD Model pages first."
             )
             return
 
@@ -1268,6 +1280,8 @@ def _render_launch_form(all_runs: list[RunInfo]) -> None:
             "portfolio_source": portfolio_source,
             "pd_bundle_dir": _selected_pd_bundle_dir,
             "lgd_bundle_dir": _selected_lgd_bundle_dir,
+            "pd_bundle_label": _selected_pd_label if _selected_pd_bundle_dir else None,
+            "lgd_bundle_label": _selected_lgd_label if _selected_lgd_bundle_dir else None,
         }
         write_state(
             prefix=prefix,
