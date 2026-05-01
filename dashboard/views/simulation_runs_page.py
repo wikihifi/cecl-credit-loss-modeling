@@ -258,7 +258,16 @@ def build_run_analytics_df(all_runs: list[RunInfo]) -> pd.DataFrame | None:
     df = df.sort_values("launch_ts", ascending=False, na_position="last")
 
     try:
-        df.to_csv(RUN_INDEX_PATH, index=False)
+        should_write = True
+        if RUN_INDEX_PATH.exists():
+            old = pd.read_csv(RUN_INDEX_PATH)
+            for col in _INDEX_COLUMNS:
+                if col not in old.columns:
+                    old[col] = None
+            old = old[_INDEX_COLUMNS]
+            should_write = not old.fillna("").equals(df.fillna(""))
+        if should_write:
+            df.to_csv(RUN_INDEX_PATH, index=False)
     except Exception:
         pass
 
