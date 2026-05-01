@@ -38,6 +38,7 @@ from views.simulation_runs_page import (
     _render_launch_form,
     _render_raw_log,
     _render_run_charts,
+    _run_selector_label,
     _render_sim_count_analytics,
     _render_step_metrics,
     _status_badge,
@@ -538,28 +539,37 @@ def _render_run_history(all_runs: list[RunInfo]) -> None:
         )
         return
 
-    running = [r for r in all_runs if r.status == "running"]
-    completed = [r for r in all_runs if r.status == "completed"]
-    failed = [r for r in all_runs if r.status == "failed"]
+    summary_rows = []
+    for run in all_runs:
+        cfg = run.config or {}
+        summary_rows.append({
+            "Prefix": run.prefix,
+            "Status": run.status,
+            "Backend": cfg.get("backend", "—"),
+            "Simulations": cfg.get("n_simulations", "—"),
+            "Source": run.source,
+            "Launched": run.launch_ts or "—",
+        })
+    st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
 
-    for group_label, group_runs in [
-        ("⏳ Active", running),
-        ("✓ Completed", completed),
-        ("✗ Failed", failed),
-    ]:
-        if not group_runs:
-            continue
-        st.markdown(
-            f'<div style="font-size:0.85rem;font-weight:600;color:#475569;'
-            f'margin:14px 0 6px;">{group_label} ({len(group_runs)})</div>',
-            unsafe_allow_html=True,
-        )
-        for run in group_runs:
-            risk_path = str(MODEL_DIR / f"{run.prefix}_risk_metrics.csv")
-            summary_path = str(MODEL_DIR / f"{run.prefix}_runtime_summary.csv")
-            risk_df = load_run_risk(risk_path)
-            summary_df = load_run_summary(summary_path)
-            _render_compact_run_card(run, risk_df, summary_df)
+    run_map = {run.prefix: run for run in all_runs}
+    default_prefix = st.session_state.get("sim_runs_analytics_selected_prefix")
+    if default_prefix not in run_map:
+        default_prefix = all_runs[0].prefix
+    prefixes = list(run_map.keys())
+    selected_prefix = st.selectbox(
+        "Inspect run",
+        options=prefixes,
+        index=prefixes.index(default_prefix),
+        format_func=lambda prefix: _run_selector_label(run_map[prefix]),
+        key="sim_runs_analytics_selected_prefix",
+    )
+    run = run_map[selected_prefix]
+    risk_path = str(MODEL_DIR / f"{run.prefix}_risk_metrics.csv")
+    summary_path = str(MODEL_DIR / f"{run.prefix}_runtime_summary.csv")
+    risk_df = load_run_risk(risk_path)
+    summary_df = load_run_summary(summary_path)
+    _render_compact_run_card(run, risk_df, summary_df)
 
 
 # ---------------------------------------------------------------------------
