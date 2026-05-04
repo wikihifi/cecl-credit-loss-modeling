@@ -1460,7 +1460,7 @@ def _render_run_charts(run: RunInfo) -> None:
 def _render_config_table(run: RunInfo) -> None:
     cfg = run.config or {}
 
-    # Dataset badge — shown above the table for prominence
+    # Dataset badge
     p_path = cfg.get("portfolio_path")
     p_label = cfg.get("portfolio_label")
     display_label = _portfolio_display_label(p_path, p_label)
@@ -1473,6 +1473,25 @@ def _render_config_table(run: RunInfo) -> None:
         + '</div>',
         unsafe_allow_html=True,
     )
+
+    # PD / LGD bundle badges
+    pd_label = cfg.get("pd_bundle_label") or cfg.get("pd_bundle_dir") or "—"
+    lgd_label = cfg.get("lgd_bundle_label") or cfg.get("lgd_bundle_dir") or "—"
+    pd_dir = cfg.get("pd_bundle_dir") or ""
+    lgd_dir = cfg.get("lgd_bundle_dir") or ""
+    if pd_dir or lgd_dir:
+        st.markdown(
+            f'<div style="background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 6px 6px 0;'
+            f'padding:6px 12px;margin-bottom:8px;font-size:0.85rem;">'
+            f'<strong>PD bundle:</strong> {pd_label}'
+            + (f'<br><span style="font-size:0.75rem;color:#64748b;font-family:monospace;">{pd_dir}</span>'
+               if pd_dir else "")
+            + f'<br><strong>LGD bundle:</strong> {lgd_label}'
+            + (f'<br><span style="font-size:0.75rem;color:#64748b;font-family:monospace;">{lgd_dir}</span>'
+               if lgd_dir else "")
+            + '</div>',
+            unsafe_allow_html=True,
+        )
 
     display_fields = [
         ("backend", "Backend"),

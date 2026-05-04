@@ -8,6 +8,8 @@ font = "sans serif"
 [server]
 headless = true
 port = 8501
+fileWatcherType = "none"
+runOnSave = false
 
 [browser]
 gatherUsageStats = false
